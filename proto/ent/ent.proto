@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package ent;
+
+import "google/protobuf/struct.proto";
+
+service GraphService {
+	rpc GetObject (GetObjectRequest) returns (GetObjectResponse);
+	rpc GetEdge (GetEdgeRequest) returns (GetEdgeResponse);
+	rpc GetEdges (GetEdgesRequest) returns (GetEdgesResponse);
+}
+
+message GetObjectRequest {
+	string objectId = 1;
+	string userToken = 2;
+}
+
+message GetObjectResponse {
+	Object object = 1;
+}
+
+message GetEdgeRequest {
+	string objectId = 1;
+	string userToken = 2;
+	string edge = 3;
+}
+
+message GetEdgeResponse {
+	Object object = 1;
+}
+
+message GetEdgesRequest {
+	string objectId = 1;
+	string userToken = 2;
+	string edge = 3;
+}
+
+message GetEdgesResponse {
+	repeated Object object = 1;
+}
+
+// IDK right now of a better way to call it, inspired by zanzibar zookies
+// they're an opaque representation of a point in time.  (think about clock skew, or consider DB the oracle...)
+message Zookie {
+	string value = 1;
+}
+
+message Object {
+	string objectId = 1;
+	string type = 2;
+	google.protobuf.Struct metadata = 3;
+}
+
+service SchemaService {
+	rpc CreateSchema (CreateSchemaRequest) returns (CreateSchemaResponse);
+}
+
+message CreateSchemaRequest {
+	string schema = 1;
+}
+
+message CreateSchemaResponse {
+}
+
