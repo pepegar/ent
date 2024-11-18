@@ -1,0 +1,5 @@
+server:
+  host: "[::1]"
+  port: 50051
+  # Maximum number of concurrent requests
+  max_connections: 1024

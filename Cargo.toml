@@ -14,6 +14,8 @@ prost-types = "0.12.6"
 tonic = "0.11.0"
 tonic-build = "0.11.0"
 tracing = "0.1.40"
+serde = "1.0.215"
+config = "0.14.1"
 
 [build-dependencies]
 tonic-build = "0.11.0"

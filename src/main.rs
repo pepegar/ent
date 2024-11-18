@@ -5,13 +5,17 @@ use server::{
 use tonic::transport::Server;
 use tracing::info;
 
+use config::Settings;
+
+mod config;
 mod server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
-    let addr = "[::1]:50051".parse()?;
+    let settings = Settings::new()?;
+    let addr = settings.server_address().parse()?;
     let graph_server = GraphServer::new();
     let schema_server = SchemaServer::new();
 
