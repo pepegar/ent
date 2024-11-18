@@ -10,8 +10,16 @@ pub struct ServerConfig {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct DatabaseConfig {
+    pub url: String,
+    pub max_connections: u32,
+    pub timeout_seconds: u64,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct Settings {
     pub server: ServerConfig,
+    pub database: DatabaseConfig,
 }
 
 impl Settings {

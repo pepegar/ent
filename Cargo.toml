@@ -3,8 +3,6 @@ name = "ent"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 tokio = { version = "1.41.1", features = ["full"] }
 tracing-subscriber = "0.3.18"
@@ -14,8 +12,10 @@ prost-types = "0.12.6"
 tonic = "0.11.0"
 tonic-build = "0.11.0"
 tracing = "0.1.40"
-serde = "1.0.215"
-config = "0.14.1"
+config = { version = "0.14", features = ["yaml"] }
+serde = { version = "1.0", features = ["derive"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "json", "time"] }
+time = { version = "0.3", features = ["serde"] }
 
 [build-dependencies]
 tonic-build = "0.11.0"

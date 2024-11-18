@@ -1,13 +1,23 @@
-{pkgs, ...}: {
-  packages = [
-    pkgs.git
-    pkgs.protobuf
-    pkgs.grpcurl
-  ];
+{
+  pkgs,
+  lib,
+  ...
+}: {
+  packages =
+    [
+      pkgs.git
+      pkgs.protobuf
+      pkgs.grpcurl
+    ]
+    ++ lib.optionals pkgs.stdenv.isDarwin [
+      pkgs.darwin.apple_sdk.frameworks.Security
+      pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
+    ];
 
   languages = {
     nix.enable = true;
     rust = {
+      channel = "nightly";
       enable = true;
       components = ["rustc" "cargo" "clippy" "rustfmt" "rust-analyzer"];
     };

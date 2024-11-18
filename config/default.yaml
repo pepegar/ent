@@ -1,5 +1,9 @@
 server:
-  host: "[::1]"
+  host: "0.0.0.0"  # Listen on all interfaces
   port: 50051
-  # Maximum number of concurrent requests
   max_connections: 1024
+
+database:
+  url: "postgres://ent:ent_password@postgres:5432/ent"
+  max_connections: 5
+  timeout_seconds: 3
