@@ -1,8 +1,4 @@
-{
-  pkgs,
-  lib,
-  ...
-}: {
+{pkgs, ...}: {
   packages = [
     pkgs.git
     pkgs.protobuf
@@ -14,6 +10,10 @@
     rust = {
       enable = true;
       components = ["rustc" "cargo" "clippy" "rustfmt" "rust-analyzer"];
+    };
+    python = {
+      enable = true;
+      venv.enable = true;
     };
   };
 

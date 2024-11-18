@@ -1,4 +1,7 @@
-use server::{ent::graph_service_server::GraphServiceServer, EntServer};
+use server::{
+    ent::{graph_service_server::GraphServiceServer, schema_service_server::SchemaServiceServer},
+    GraphServer, SchemaServer,
+};
 use tonic::transport::Server;
 use tracing::info;
 
@@ -9,12 +12,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     let addr = "[::1]:50051".parse()?;
-    let ent_server = EntServer::new();
+    let graph_server = GraphServer::new();
+    let schema_server = SchemaServer::new();
 
     info!("Server listening on {}", addr);
 
     Server::builder()
-        .add_service(GraphServiceServer::new(ent_server))
+        .add_service(GraphServiceServer::new(graph_server))
+        .add_service(SchemaServiceServer::new(schema_server))
         .serve(addr)
         .await?;
 
