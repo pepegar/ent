@@ -420,6 +420,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "config",
+ "once_cell",
  "prost",
  "prost-types",
  "serde",
@@ -431,6 +432,7 @@ dependencies = [
  "tonic-build",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -1853,6 +1855,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "url",
+ "uuid",
  "webpki-roots",
 ]
 
@@ -1935,6 +1938,7 @@ dependencies = [
  "thiserror",
  "time",
  "tracing",
+ "uuid",
  "whoami",
 ]
 
@@ -1974,6 +1978,7 @@ dependencies = [
  "thiserror",
  "time",
  "tracing",
+ "uuid",
  "whoami",
 ]
 
@@ -1999,6 +2004,7 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
+ "uuid",
 ]
 
 [[package]]
@@ -2489,6 +2495,15 @@ name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
+
+[[package]]
+name = "uuid"
+version = "1.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "81dfa00651efa65069b0b6b651f4aaa31ba9e3c3ce0137aaad053604ee7e0314"
+dependencies = [
+ "getrandom",
+]
 
 [[package]]
 name = "valuable"

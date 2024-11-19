@@ -9,7 +9,7 @@ use tonic::{Request, Response, Status};
 pub struct GraphServer {}
 
 impl GraphServer {
-    pub(crate) fn new() -> GraphServer {
+    pub fn new() -> GraphServer {
         GraphServer {}
     }
 }
