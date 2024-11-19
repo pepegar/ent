@@ -2,7 +2,10 @@ use anyhow::Result;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{info, warn, instrument};
+use tracing::{info, instrument, warn};
+
+// Export the schema module
+pub mod schema;
 
 pub struct Database {
     pool: PgPool,
@@ -48,5 +51,7 @@ impl Database {
         }
     }
 
-    // ... rest of your Database implementation ...
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
 }

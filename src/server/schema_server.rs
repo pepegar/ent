@@ -1,22 +1,36 @@
 use super::ent::schema_service_server::SchemaService;
 use super::ent::{CreateSchemaRequest, CreateSchemaResponse};
+use crate::db::schema::SchemaRepository;
+use sqlx::PgPool;
 use tonic::{async_trait, Request, Response, Status};
 
 #[derive(Debug)]
-pub struct SchemaServer {}
+pub struct SchemaServer {
+    repository: SchemaRepository,
+}
 
 impl SchemaServer {
-    pub(crate) fn new() -> SchemaServer {
-        SchemaServer {}
+    pub fn new(pool: PgPool) -> Self {
+        let repository = SchemaRepository::new(pool);
+        SchemaServer { repository }
     }
 }
 
-#[async_trait()]
+#[async_trait]
 impl SchemaService for SchemaServer {
+    #[tracing::instrument(skip(self))]
     async fn create_schema(
         &self,
-        _request: Request<CreateSchemaRequest>,
+        request: Request<CreateSchemaRequest>,
     ) -> Result<Response<CreateSchemaResponse>, Status> {
-        todo!();
+        let schema = request.into_inner().schema;
+
+        match self.repository.create_schema(&schema).await {
+            Ok(_) => Ok(Response::new(CreateSchemaResponse {})),
+            Err(e) => {
+                tracing::error!("Failed to create schema: {:?}", e);
+                Err(Status::internal("Failed to create schema"))
+            }
+        }
     }
 }
