@@ -27,6 +27,9 @@
     python = {
       enable = true;
       venv.enable = true;
+      venv.requirements = ''
+        files-to-prompt==0.4
+      '';
     };
   };
 

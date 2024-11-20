@@ -69,12 +69,13 @@ mod common {
         settings.server.port = addr.port();
 
         // Clone pool for the server
-        let server_pool = pool.clone();
+        let schema_pool = pool.clone();
+        let graph_pool = pool.clone();
 
         // Spawn the server in the background
         tokio::spawn(async move {
-            let schema_server = ent::server::SchemaServer::new(server_pool);
-            let graph_server = ent::server::GraphServer::new();
+            let schema_server = ent::server::SchemaServer::new(schema_pool);
+            let graph_server = ent::server::GraphServer::new(graph_pool);
 
             Server::builder()
                 .add_service(
