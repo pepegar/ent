@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use server::{
     ent::{graph_service_server::GraphServiceServer, schema_service_server::SchemaServiceServer},
     GraphServer, SchemaServer,
@@ -26,16 +27,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let graph_pool = pool.clone();
 
+    let (_, health) = tonic_health::server::health_reporter();
     let graph_server = GraphServer::new(graph_pool);
     let schema_server = SchemaServer::new(pool);
+
+    let reflection_service = tonic_reflection::server::Builder::configure()
+        .register_encoded_file_descriptor_set(server::proto::FILE_DESCRIPTOR_SET)
+        .build_v1()
+        .map_err(|e| anyhow!("failed to build grpc reflection service: {}", e))?;
 
     info!("Server listening on {}", addr);
 
     Server::builder()
         .add_service(GraphServiceServer::new(graph_server))
         .add_service(SchemaServiceServer::new(schema_server))
+        .add_service(health)
+        .add_service(reflection_service)
         .serve(addr)
-        .await?;
+        .await
+        .map_err(|e| anyhow!("tonic server exited with error: {}", e))?;
 
     Ok(())
 }
