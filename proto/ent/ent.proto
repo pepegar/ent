@@ -4,10 +4,20 @@ package ent;
 
 import "google/protobuf/struct.proto";
 
+message ConsistencyRequirement {
+    oneof requirement {
+        bool full_consistency = 1;
+        string at_least_as_fresh_zookie = 2;
+        string exactly_at_zookie = 3; 
+        bool minimize_latency = 4;
+    }
+}
+
 service GraphService {
 	rpc GetObject (GetObjectRequest) returns (GetObjectResponse);
 	rpc GetEdge (GetEdgeRequest) returns (GetEdgeResponse);
 	rpc GetEdges (GetEdgesRequest) returns (GetEdgesResponse);
+	rpc CreateObject (CreateObjectRequest) returns (CreateObjectResponse);
 }
 
 message GetObjectRequest {
@@ -39,10 +49,14 @@ message GetEdgesResponse {
 	repeated Object object = 1;
 }
 
-// IDK right now of a better way to call it, inspired by zanzibar zookies
-// they're an opaque representation of a point in time.  (think about clock skew, or consider DB the oracle...)
-message Zookie {
-	string value = 1;
+message CreateObjectRequest {
+    string type = 1;
+    google.protobuf.Struct metadata = 2;
+}
+
+message CreateObjectResponse {
+    Object object = 1;
+    string zookie = 2;  // Revision at which the object was created
 }
 
 message Object {

@@ -1,7 +1,7 @@
 use super::ent::graph_service_server::GraphService;
 use super::ent::{
-    GetEdgeRequest, GetEdgeResponse, GetEdgesRequest, GetEdgesResponse, GetObjectRequest,
-    GetObjectResponse, Object as ProtoObject,
+    CreateObjectRequest, CreateObjectResponse, GetEdgeRequest, GetEdgeResponse, GetEdgesRequest,
+    GetEdgesResponse, GetObjectRequest, GetObjectResponse, Object as ProtoObject,
 };
 use crate::db::graph::{GraphRepository, Object};
 use prost_types::Struct;
@@ -179,6 +179,13 @@ impl GraphService for GraphServer {
                 Err(Status::internal("Failed to get edges"))
             }
         }
+    }
+
+    async fn create_object(
+        &self,
+        _request: Request<CreateObjectRequest>,
+    ) -> Result<Response<CreateObjectResponse>, Status> {
+        todo!()
     }
 }
 
