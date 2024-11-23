@@ -7,6 +7,8 @@ use tracing::{info, instrument, warn};
 // Export the schema module
 pub mod graph;
 pub mod schema;
+pub mod transaction;
+pub mod xid;
 
 pub struct Database {
     pool: PgPool,
