@@ -108,43 +108,6 @@ impl Encode<'_, sqlx::Postgres> for PgSnapshot {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_snapshot_parsing() {
-        // Test empty transaction list
-        let snapshot = PgSnapshot::from_str("100:100:").unwrap();
-        assert_eq!(snapshot.xmin, 100);
-        assert_eq!(snapshot.xmax, 100);
-        assert!(snapshot.xip_list.is_empty());
-
-        // Test with in-progress transactions
-        let snapshot = PgSnapshot::from_str("100:105:101,102,103").unwrap();
-        assert_eq!(snapshot.xmin, 100);
-        assert_eq!(snapshot.xmax, 105);
-        assert_eq!(snapshot.xip_list, vec![101, 102, 103]);
-    }
-
-    #[test]
-    fn test_snapshot_to_string() {
-        let snapshot = PgSnapshot {
-            xmin: 100,
-            xmax: 105,
-            xip_list: vec![101, 102, 103],
-        };
-        assert_eq!(snapshot.to_string(), "100:105:101,102,103");
-
-        let snapshot = PgSnapshot {
-            xmin: 100,
-            xmax: 100,
-            xip_list: vec![],
-        };
-        assert_eq!(snapshot.to_string(), "100:100:");
-    }
-}
-
 impl PgSnapshot {
     pub fn is_visible(&self, xid: u64) -> bool {
         if xid < self.xmin {
@@ -239,5 +202,49 @@ impl Transaction {
             snapshot: row.snapshot,
             metadata: Some(row.metadata),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_snapshot_parsing() {
+        // Test empty transaction list
+        let snapshot = PgSnapshot::from_str("100:100:").unwrap();
+        assert_eq!(snapshot.xmin, 100);
+        assert_eq!(snapshot.xmax, 100);
+        assert!(snapshot.xip_list.is_empty());
+
+        // Test with in-progress transactions
+        let snapshot = PgSnapshot::from_str("100:105:101,102,103").unwrap();
+        assert_eq!(snapshot.xmin, 100);
+        assert_eq!(snapshot.xmax, 105);
+        assert_eq!(snapshot.xip_list, vec![101, 102, 103]);
+
+        // Test error cases
+        let err = PgSnapshot::from_str("invalid").unwrap_err();
+        assert!(err.to_string().contains("Invalid snapshot format"));
+
+        let err = PgSnapshot::from_str("a:b:c").unwrap_err();
+        assert!(err.to_string().contains("Invalid xmin"));
+    }
+
+    #[test]
+    fn test_snapshot_to_string() {
+        let snapshot = PgSnapshot {
+            xmin: 100,
+            xmax: 105,
+            xip_list: vec![101, 102, 103],
+        };
+        assert_eq!(snapshot.to_string(), "100:105:101,102,103");
+
+        let snapshot = PgSnapshot {
+            xmin: 100,
+            xmax: 100,
+            xip_list: vec![],
+        };
+        assert_eq!(snapshot.to_string(), "100:100:");
     }
 }
