@@ -5,7 +5,7 @@ use tracing::instrument;
 
 #[derive(Debug)]
 pub struct Schema {
-    pub id: i32,
+    pub id: i64,
     pub schema: serde_json::Value,
     pub created_at: Option<OffsetDateTime>,
     pub updated_at: Option<OffsetDateTime>,
@@ -47,7 +47,7 @@ impl SchemaRepository {
     }
 
     #[instrument(skip(self))]
-    pub async fn get_schema(&self, id: i32) -> Result<Option<Schema>> {
+    pub async fn get_schema(&self, id: i64) -> Result<Option<Schema>> {
         let schema = sqlx::query_as!(
             Schema,
             r#"

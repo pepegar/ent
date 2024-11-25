@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS _schema_version (
 
 -- Create schemata table
 CREATE TABLE IF NOT EXISTS schemata (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     schema JSONB NOT NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS schemata (
 
 -- Create objects table
 CREATE TABLE IF NOT EXISTS objects (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     type TEXT NOT NULL,
     metadata JSONB NOT NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -23,12 +23,12 @@ CREATE TABLE IF NOT EXISTS objects (
 
 -- Create triples table
 CREATE TABLE IF NOT EXISTS triples (
-    id SERIAL PRIMARY KEY,
+    id BIGSERIAL PRIMARY KEY,
     from_type TEXT NOT NULL,
-    from_id INTEGER NOT NULL,
+    from_id BIGINT NOT NULL,
     relation TEXT NOT NULL,
     to_type TEXT NOT NULL,
-    to_id INTEGER NOT NULL,
+    to_id BIGINT NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );

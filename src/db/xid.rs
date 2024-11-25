@@ -1,6 +1,6 @@
 use sqlx::decode::Decode;
 use sqlx::encode::{Encode, IsNull};
-use sqlx::postgres::{PgArgumentBuffer, PgRow, PgTypeInfo, PgValueRef};
+use sqlx::postgres::{PgArgumentBuffer, PgTypeInfo, PgValueRef};
 use sqlx::types::Type;
 use std::ops::Deref;
 

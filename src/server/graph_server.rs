@@ -81,16 +81,10 @@ impl GraphServer {
         let metadata = Struct { fields };
 
         ProtoObject {
-            object_id: obj.id.to_string(),
+            id: obj.id,
             r#type: obj.type_name,
             metadata: Some(metadata),
         }
-    }
-
-    // Helper function to convert object ID from string to i32
-    fn parse_object_id(id: &str) -> Result<i32, Status> {
-        id.parse::<i32>()
-            .map_err(|_| Status::invalid_argument("Invalid object ID format"))
     }
 }
 
@@ -102,9 +96,8 @@ impl GraphService for GraphServer {
         request: Request<GetObjectRequest>,
     ) -> Result<Response<GetObjectResponse>, Status> {
         let req = request.into_inner();
-        let object_id = Self::parse_object_id(&req.object_id)?;
 
-        match self.repository.get_object(object_id).await {
+        match self.repository.get_object(req.object_id).await {
             Ok(Some(obj)) => Ok(Response::new(GetObjectResponse {
                 object: Some(Self::to_proto_object(obj)),
             })),
@@ -122,9 +115,12 @@ impl GraphService for GraphServer {
         request: Request<GetEdgeRequest>,
     ) -> Result<Response<GetEdgeResponse>, Status> {
         let req = request.into_inner();
-        let object_id = Self::parse_object_id(&req.object_id)?;
 
-        match self.repository.get_edge(object_id, &req.edge).await {
+        match self
+            .repository
+            .get_edge(req.object_id, &req.edge_type)
+            .await
+        {
             Ok(Some(edge)) => {
                 // Get the target object
                 match self.repository.get_object(edge.to_id).await {
@@ -152,9 +148,12 @@ impl GraphService for GraphServer {
         request: Request<GetEdgesRequest>,
     ) -> Result<Response<GetEdgesResponse>, Status> {
         let req = request.into_inner();
-        let object_id = Self::parse_object_id(&req.object_id)?;
 
-        match self.repository.get_edges(object_id, &req.edge).await {
+        match self
+            .repository
+            .get_edges(req.object_id, &req.edge_type)
+            .await
+        {
             Ok(edges) => {
                 let mut objects = Vec::new();
                 for edge in edges {
@@ -172,7 +171,7 @@ impl GraphService for GraphServer {
                         }
                     }
                 }
-                Ok(Response::new(GetEdgesResponse { object: objects }))
+                Ok(Response::new(GetEdgesResponse { objects }))
             }
             Err(e) => {
                 tracing::error!("Failed to get edges: {:?}", e);

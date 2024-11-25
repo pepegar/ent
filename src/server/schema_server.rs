@@ -26,7 +26,9 @@ impl SchemaService for SchemaServer {
         let schema = request.into_inner().schema;
 
         match self.repository.create_schema(&schema).await {
-            Ok(_) => Ok(Response::new(CreateSchemaResponse {})),
+            Ok(schema) => Ok(Response::new(CreateSchemaResponse {
+                schema_id: schema.id,
+            })),
             Err(e) => {
                 tracing::error!("Failed to create schema: {:?}", e);
                 Err(Status::internal("Failed to create schema"))

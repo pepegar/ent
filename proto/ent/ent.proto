@@ -4,75 +4,106 @@ package ent;
 
 import "google/protobuf/struct.proto";
 
-message ConsistencyRequirement {
-    oneof requirement {
-        bool full_consistency = 1;
-        string at_least_as_fresh_zookie = 2;
-        string exactly_at_zookie = 3; 
-        bool minimize_latency = 4;
-    }
+// Common Types
+
+// Zookie represents an opaque, encoded revision marker for an operation
+message Zookie {
+  string value = 1;  // Base64-encoded revision marker
 }
 
+// Represents consistency requirements for read operations
+message ConsistencyRequirement {
+  oneof requirement {
+    // Full consistency requires synchronous replication
+    bool full_consistency = 1;
+
+    // Require staleness no greater than specified zookie
+    Zookie at_least_as_fresh = 2;  
+
+    // Read exactly at specified zookie revision
+    Zookie exactly_at = 3;
+
+    // Optimize for lowest latency, allowing for staleness
+    bool minimize_latency = 4;  
+  }
+}
+
+// Core object type used across services
+message Object {
+  int64 id = 1;                      // Unique identifier for the object
+  string type = 2;                    // Object type/schema name
+  google.protobuf.Struct metadata = 3; // Object properties and data
+}
+
+// Graph Service - Handles operations on objects and edges
+
 service GraphService {
-	rpc GetObject (GetObjectRequest) returns (GetObjectResponse);
-	rpc GetEdge (GetEdgeRequest) returns (GetEdgeResponse);
-	rpc GetEdges (GetEdgesRequest) returns (GetEdgesResponse);
-	rpc CreateObject (CreateObjectRequest) returns (CreateObjectResponse);
+  // Retrieve a single object by ID
+  rpc GetObject(GetObjectRequest) returns (GetObjectResponse);
+
+  // Get a single edge (relationship) from an object
+  rpc GetEdge(GetEdgeRequest) returns (GetEdgeResponse);
+
+  // Get multiple edges (relationships) from an object
+  rpc GetEdges(GetEdgesRequest) returns (GetEdgesResponse);
+
+  // Create a new object
+  rpc CreateObject(CreateObjectRequest) returns (CreateObjectResponse);
 }
 
 message GetObjectRequest {
-	string objectId = 1;
-	string userToken = 2;
+  int64 object_id = 1;                       // ID of object to retrieve
+  string user_token = 2;                      // Authentication token 
+  ConsistencyRequirement consistency = 3;     // Read consistency requirements
 }
 
 message GetObjectResponse {
-	Object object = 1;
+  Object object = 1;                          // Retrieved object
 }
 
 message GetEdgeRequest {
-	string objectId = 1;
-	string userToken = 2;
-	string edge = 3;
+  int64 object_id = 1;                       // Source object ID
+  string user_token = 2;                      // Authentication token
+  string edge_type = 3;                       // Type of edge to retrieve
+  ConsistencyRequirement consistency = 4;     // Read consistency requirements
 }
 
 message GetEdgeResponse {
-	Object object = 1;
+  Object object = 1;                          // Target object
 }
 
 message GetEdgesRequest {
-	string objectId = 1;
-	string userToken = 2;
-	string edge = 3;
+  int64 object_id = 1;                       // Source object ID
+  string user_token = 2;                      // Authentication token
+  string edge_type = 3;                       // Type of edges to retrieve
+  ConsistencyRequirement consistency = 4;     // Read consistency requirements
 }
 
 message GetEdgesResponse {
-	repeated Object object = 1;
+  repeated Object objects = 1;                // Target objects
 }
 
 message CreateObjectRequest {
-    string type = 1;
-    google.protobuf.Struct metadata = 2;
+  string type = 1;                           // Type of object to create
+  google.protobuf.Struct metadata = 2;       // Object properties and data
 }
 
 message CreateObjectResponse {
-    Object object = 1;
-    string zookie = 2;  // Revision at which the object was created
+  Object object = 1;                         // Created object
+  Zookie revision = 2;                       // Revision at which object was created
 }
 
-message Object {
-	string objectId = 1;
-	string type = 2;
-	google.protobuf.Struct metadata = 3;
-}
-
+// Schema Service - Handles schema definitions and evolution
 service SchemaService {
-	rpc CreateSchema (CreateSchemaRequest) returns (CreateSchemaResponse);
+  // Create or update a schema definition
+  rpc CreateSchema(CreateSchemaRequest) returns (CreateSchemaResponse);
 }
 
 message CreateSchemaRequest {
-	string schema = 1;
+  string schema = 1;                          // JSON Schema definition
+  string description = 2;                     // Optional schema description
 }
 
 message CreateSchemaResponse {
+  int64 schema_id = 1;                        // Unique identifier for created schema
 }
-

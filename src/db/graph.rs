@@ -6,7 +6,7 @@ use tracing::instrument;
 
 #[derive(Debug)]
 pub struct Object {
-    pub id: i32,
+    pub id: i64,
     pub type_name: String,
     pub metadata: Value,
     pub created_at: Option<OffsetDateTime>,
@@ -15,12 +15,12 @@ pub struct Object {
 
 #[derive(Debug)]
 pub struct Edge {
-    pub id: i32,
+    pub id: i64,
     pub from_type: String,
-    pub from_id: i32,
+    pub from_id: i64,
     pub relation: String,
     pub to_type: String,
-    pub to_id: i32,
+    pub to_id: i64,
     pub metadata: Value,
     pub created_at: Option<OffsetDateTime>,
 }
@@ -36,7 +36,7 @@ impl GraphRepository {
     }
 
     #[instrument(skip(self))]
-    pub async fn get_object(&self, id: i32) -> Result<Option<Object>> {
+    pub async fn get_object(&self, id: i64) -> Result<Option<Object>> {
         let object = sqlx::query_as!(
             Object,
             r#"
@@ -58,7 +58,7 @@ impl GraphRepository {
     }
 
     #[instrument(skip(self))]
-    pub async fn get_edge(&self, from_id: i32, relation: &str) -> Result<Option<Edge>> {
+    pub async fn get_edge(&self, from_id: i64, relation: &str) -> Result<Option<Edge>> {
         let edge = sqlx::query_as!(
             Edge,
             r#"
@@ -85,7 +85,7 @@ impl GraphRepository {
     }
 
     #[instrument(skip(self))]
-    pub async fn get_edges(&self, from_id: i32, relation: &str) -> Result<Vec<Edge>> {
+    pub async fn get_edges(&self, from_id: i64, relation: &str) -> Result<Vec<Edge>> {
         let edges = sqlx::query_as!(
             Edge,
             r#"
