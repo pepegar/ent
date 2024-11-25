@@ -1,20 +1,15 @@
-use anyhow::anyhow;
-use server::{
-    ent::{graph_service_server::GraphServiceServer, schema_service_server::SchemaServiceServer},
-    GraphServer, SchemaServer,
+use anyhow::{anyhow, Result};
+use ent_proto::ent::{
+    graph_service_server::GraphServiceServer, schema_service_server::SchemaServiceServer,
 };
 use sqlx::postgres::PgPoolOptions;
 use tonic::transport::Server;
 use tracing::info;
 
-use config::Settings;
-
-mod config;
-mod db;
-mod server;
+use ent_server::{config::Settings, GraphServer, SchemaServer};
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     let settings = Settings::new()?;
@@ -32,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema_server = SchemaServer::new(pool);
 
     let reflection_service = tonic_reflection::server::Builder::configure()
-        .register_encoded_file_descriptor_set(server::proto::FILE_DESCRIPTOR_SET)
+        .register_encoded_file_descriptor_set(ent_proto::proto::FILE_DESCRIPTOR_SET)
         .build_v1()
         .map_err(|e| anyhow!("failed to build grpc reflection service: {}", e))?;
 

@@ -1,9 +1,9 @@
-use super::ent::graph_service_server::GraphService;
-use super::ent::{
+use crate::db::graph::{GraphRepository, Object};
+use ent_proto::ent::graph_service_server::GraphService;
+use ent_proto::ent::{
     CreateObjectRequest, CreateObjectResponse, GetEdgeRequest, GetEdgeResponse, GetEdgesRequest,
     GetEdgesResponse, GetObjectRequest, GetObjectResponse, Object as ProtoObject,
 };
-use crate::db::graph::{GraphRepository, Object};
 use prost_types::Struct;
 use prost_types::Value as ProstValue;
 use serde_json::Value as JsonValue;

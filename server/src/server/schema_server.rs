@@ -1,6 +1,6 @@
-use super::ent::schema_service_server::SchemaService;
-use super::ent::{CreateSchemaRequest, CreateSchemaResponse};
 use crate::db::schema::SchemaRepository;
+use ent_proto::ent::schema_service_server::SchemaService;
+use ent_proto::ent::{CreateSchemaRequest, CreateSchemaResponse};
 use sqlx::PgPool;
 use tonic::{async_trait, Request, Response, Status};
 
