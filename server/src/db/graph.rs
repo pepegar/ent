@@ -1,8 +1,11 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use ent_proto::ent::Object as ProtoObject;
 use serde_json::Value;
 use sqlx::PgPool;
 use time::OffsetDateTime;
 use tracing::instrument;
+
+use crate::server::json_value_to_prost_value;
 
 #[derive(Debug)]
 pub struct Object {
@@ -108,6 +111,53 @@ impl GraphRepository {
         .await?;
 
         Ok(edges)
+    }
+
+    #[instrument(skip(self))]
+    pub async fn get_related_objects(
+        &self,
+        from_id: i64,
+        relation: &str,
+    ) -> Result<Vec<ProtoObject>> {
+        let query_result = sqlx::query!(
+            r#"
+            SELECT 
+                o.id,
+                o.type as "type_name",
+                o.metadata as "metadata: Value",
+                o.created_at as "created_at?: OffsetDateTime",
+                o.updated_at as "updated_at?: OffsetDateTime"
+            FROM triples t
+            JOIN objects o ON t.to_id = o.id
+            WHERE t.from_id = $1 AND t.relation = $2
+            "#,
+            from_id,
+            relation
+        )
+        .fetch_all(&self.pool)
+        .await;
+
+        match query_result {
+            Ok(rows) => {
+                let objects = rows
+                    .into_iter()
+                    .map(|row| ProtoObject {
+                        id: row.id,
+                        r#type: row.type_name,
+                        metadata: match json_value_to_prost_value(row.metadata).kind {
+                            Some(prost_types::value::Kind::StructValue(v)) => Some(v),
+                            _ => todo!(),
+                        },
+                    })
+                    .collect();
+
+                Ok(objects)
+            }
+            Err(e) => {
+                tracing::error!("Failed to get edges: {:?}", e);
+                Err(anyhow!("Failed to get edges"))
+            }
+        }
     }
 }
 

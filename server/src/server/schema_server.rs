@@ -3,6 +3,7 @@ use ent_proto::ent::schema_service_server::SchemaService;
 use ent_proto::ent::{CreateSchemaRequest, CreateSchemaResponse};
 use sqlx::PgPool;
 use tonic::{async_trait, Request, Response, Status};
+use tracing::info;
 
 #[derive(Debug)]
 pub struct SchemaServer {
@@ -23,6 +24,7 @@ impl SchemaService for SchemaServer {
         &self,
         request: Request<CreateSchemaRequest>,
     ) -> Result<Response<CreateSchemaResponse>, Status> {
+        info!("Received request to create schema {:?}", request);
         let schema = request.into_inner().schema;
 
         match self.repository.create_schema(&schema).await {

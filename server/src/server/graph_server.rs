@@ -10,6 +10,8 @@ use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use tonic::{Request, Response, Status};
 
+use super::json_value_to_prost_value;
+
 #[derive(Debug)]
 pub struct GraphServer {
     repository: GraphRepository,
@@ -21,59 +23,12 @@ impl GraphServer {
         Self { repository }
     }
 
-    // Helper function to convert serde_json::Value to prost_types::Value
-    fn json_value_to_prost_value(json_value: JsonValue) -> ProstValue {
-        match json_value {
-            JsonValue::Null => ProstValue {
-                kind: Some(prost_types::value::Kind::NullValue(0)),
-            },
-            JsonValue::Bool(b) => ProstValue {
-                kind: Some(prost_types::value::Kind::BoolValue(b)),
-            },
-            JsonValue::Number(n) => {
-                if let Some(f) = n.as_f64() {
-                    ProstValue {
-                        kind: Some(prost_types::value::Kind::NumberValue(f)),
-                    }
-                } else {
-                    // Handle integers that don't fit in f64
-                    ProstValue {
-                        kind: Some(prost_types::value::Kind::StringValue(n.to_string())),
-                    }
-                }
-            }
-            JsonValue::String(s) => ProstValue {
-                kind: Some(prost_types::value::Kind::StringValue(s)),
-            },
-            JsonValue::Array(arr) => {
-                let values: Vec<ProstValue> = arr
-                    .into_iter()
-                    .map(Self::json_value_to_prost_value)
-                    .collect();
-                ProstValue {
-                    kind: Some(prost_types::value::Kind::ListValue(
-                        prost_types::ListValue { values },
-                    )),
-                }
-            }
-            JsonValue::Object(map) => {
-                let mut fields = std::collections::BTreeMap::new();
-                for (k, v) in map {
-                    fields.insert(k, Self::json_value_to_prost_value(v));
-                }
-                ProstValue {
-                    kind: Some(prost_types::value::Kind::StructValue(Struct { fields })),
-                }
-            }
-        }
-    }
-
     // Helper function to convert our domain Object to protobuf Object
     fn to_proto_object(obj: Object) -> ProtoObject {
         let fields: std::collections::BTreeMap<String, ProstValue> = match obj.metadata {
             JsonValue::Object(map) => map
                 .into_iter()
-                .map(|(k, v)| (k, Self::json_value_to_prost_value(v)))
+                .map(|(k, v)| (k, json_value_to_prost_value(v)))
                 .collect(),
             _ => std::collections::BTreeMap::new(), // Handle non-object values
         };
@@ -255,7 +210,7 @@ mod tests {
     /// Test that converting to protobuf and back preserves the semantic meaning
     fn round_trip_json(original: &JsonValue) -> JsonValue {
         // Convert JSON -> Protobuf
-        let prost_value = GraphServer::json_value_to_prost_value(original.clone());
+        let prost_value = json_value_to_prost_value(original.clone());
         // Convert Protobuf -> JSON
         prost_value_to_json(&prost_value)
     }
@@ -264,7 +219,7 @@ mod tests {
         // Test that any valid JSON value can be converted to protobuf
         #[test]
         fn test_json_conversion_doesnt_panic(value in json_value_strategy()) {
-            let _ = GraphServer::json_value_to_prost_value(value);
+            let _ = json_value_to_prost_value(value);
         }
 
         // Test that conversion preserves values (within reasonable bounds)
