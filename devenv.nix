@@ -12,6 +12,7 @@
       pkgs.git
       pkgs.protobuf
       pkgs.grpcurl
+      pkgs.sqlx-cli
     ]
     ++ lib.optionals pkgs.stdenv.isDarwin [
       pkgs.darwin.apple_sdk.frameworks.SystemConfiguration

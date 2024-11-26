@@ -1,9 +1,3 @@
--- Create schema version table
-CREATE TABLE IF NOT EXISTS _schema_version (
-    version INTEGER PRIMARY KEY,
-    applied_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-
 -- Create schemata table
 CREATE TABLE IF NOT EXISTS schemata (
     id BIGSERIAL PRIMARY KEY,
@@ -15,6 +9,7 @@ CREATE TABLE IF NOT EXISTS schemata (
 -- Create objects table
 CREATE TABLE IF NOT EXISTS objects (
     id BIGSERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL,
     type TEXT NOT NULL,
     metadata JSONB NOT NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -24,6 +19,7 @@ CREATE TABLE IF NOT EXISTS objects (
 -- Create triples table
 CREATE TABLE IF NOT EXISTS triples (
     id BIGSERIAL PRIMARY KEY,
+    user_id TEXT NOT NULL,
     from_type TEXT NOT NULL,
     from_id BIGINT NOT NULL,
     relation TEXT NOT NULL,
@@ -35,8 +31,10 @@ CREATE TABLE IF NOT EXISTS triples (
 
 -- Create indexes
 CREATE INDEX idx_objects_type ON objects(type);
+CREATE INDEX idx_objects_user_id ON objects(user_id);
 CREATE INDEX idx_triples_from ON triples(from_type, from_id);
 CREATE INDEX idx_triples_to ON triples(to_type, to_id);
+CREATE INDEX idx_triples_user_id ON triples(user_id);
 CREATE INDEX idx_triples_relation ON triples(relation);
 
 -- Add foreign key constraints
