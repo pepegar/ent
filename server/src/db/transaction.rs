@@ -6,13 +6,14 @@ use std::{
 use super::xid::Xid8;
 use anyhow::{anyhow, Result};
 use base64::{self, engine::general_purpose::URL_SAFE as base64_url, Engine};
+use ent_proto::ent::Zookie;
 use serde::{Deserialize, Serialize};
 use sqlx::{
     encode::IsNull,
     error::BoxDynError,
     postgres::{PgArgumentBuffer, PgTypeInfo, PgValueRef},
     types::Json,
-    Decode, Encode, PgPool, Type,
+    Decode, Encode, Type,
 };
 
 #[derive(Debug)]
@@ -141,14 +142,16 @@ pub struct Revision {
 }
 
 impl Revision {
-    pub fn to_zookie(&self) -> Result<String> {
+    pub fn to_zookie(&self) -> Result<Zookie> {
         let bytes = serde_json::to_vec(self)?;
-        Ok(base64_url.encode(bytes))
+        Ok(Zookie {
+            value: base64_url.encode(bytes),
+        })
     }
 
-    pub fn from_zookie(zookie: &str) -> Result<Self> {
+    pub fn from_zookie(zookie: Zookie) -> Result<Self> {
         let bytes = base64_url
-            .decode(zookie)
+            .decode(zookie.value.as_bytes())
             .map_err(|_| anyhow!("Invalid zookie encoding"))?;
 
         serde_json::from_slice(&bytes).map_err(|_| anyhow!("Invalid zookie format"))
@@ -184,17 +187,19 @@ impl Transaction {
         }
     }
 
-    pub async fn create(pool: &PgPool) -> Result<Transaction> {
+    pub async fn create(
+        transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<Transaction> {
         let row = sqlx::query!(
             r#"
-        INSERT INTO relation_tuple_transaction DEFAULT VALUES 
-        RETURNING 
-                xid as "xid!: Xid8",
-                snapshot as "snapshot!: PgSnapshot",
-                metadata as "metadata: Json<serde_json::Value>"
-        "#
+            INSERT INTO relation_tuple_transaction DEFAULT VALUES 
+            RETURNING
+                    xid as "xid!: Xid8",
+                    snapshot as "snapshot!: PgSnapshot",
+                    metadata as "metadata: Json<serde_json::Value>"
+            "#
         )
-        .fetch_one(pool)
+        .fetch_one(&mut **transaction)
         .await?;
 
         Ok(Transaction {

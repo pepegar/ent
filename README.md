@@ -6,19 +6,19 @@ Clients can tune the consistency level on reads. (fullconsistency, after(timesta
 
 ## TODO
 
-- [ ] find a way to create tokio servers from grpc
+- [x] find a way to create tokio servers from grpc
 - [ ] ci: run tests in gha
 - [ ] cd: create -latest images on push, push
 - [ ] think about zookies?  This may constrain the datastores we can use.  Does psql support point in time?
-- [ ] define grpc for schemaservice, graphservice & userservice
-- [ ] find a way to create migrations
+- [x] define grpc for schemaservice, graphservice & userservice
+- [x] find a way to create migrations
 - [ ] find a library for jsonschema validation
 - [ ] describe schema evolution principles
-- [ ] create initial migrations for all subsystems
+- [x] create initial migrations for all subsystems
 - [ ] protobuf: integrate buf.build
 - [ ] license: find a license that allows users to self-deploy, but not comercialize.
 - [ ] client: think about the ORM side of things
-- [ ] deployment: create dockerfile
+- [x] deployment: create dockerfile
 - [ ] deployment: create helm
 
 ## Users vs Clients
@@ -144,3 +144,15 @@ create table schemata (
     schema jsonb,
 )
 ```
+
+## Bring your own identities
+
+Ent does not manage identities.  It's up to the user to manage identities.  The
+only think Ent expects is that user requests come with a jwt that identifies
+the user.
+
+By default, Ent will get the user id from the jwt (`sub` claim) and associate
+all edges & objects create by that user with that id.
+
+Ent validates the jwt with the public key of the issuer, but does not store or
+refresh tokens for the user, it's up to the client to perform that.

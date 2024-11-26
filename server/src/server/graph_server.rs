@@ -1,3 +1,4 @@
+use crate::auth::AuthenticatedRequest;
 use crate::db::graph::{GraphRepository, Object};
 use ent_proto::ent::graph_service_server::GraphService;
 use ent_proto::ent::{
@@ -137,9 +138,25 @@ impl GraphService for GraphServer {
 
     async fn create_object(
         &self,
-        _request: Request<CreateObjectRequest>,
+        request: Request<CreateObjectRequest>,
     ) -> Result<Response<CreateObjectResponse>, Status> {
-        todo!()
+        // Extract user ID from JWT
+        let user_id = request.user_id()?;
+
+        let req = request.into_inner();
+
+        // Use the user_id when creating the object
+        // This would be stored in your database along with the object
+        let (object, revision) = self
+            .repository
+            .create_object(user_id, req)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(CreateObjectResponse {
+            object: Some(object.to_pb()),
+            revision: revision.to_zookie().ok(), // Fill this in based on your revision tracking
+        }))
     }
 }
 

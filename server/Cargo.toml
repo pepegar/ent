@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 ent-proto = { path = "../proto" }
 tokio.workspace = true
+jsonwebtoken.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true

@@ -12,6 +12,10 @@ impl Xid8 {
     pub fn value(&self) -> u64 {
         self.0
     }
+
+    pub fn max() -> Self {
+        Xid8(9223372036854775807)
+    }
 }
 
 impl Deref for Xid8 {
