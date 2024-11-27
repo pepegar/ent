@@ -1,19 +1,40 @@
+use std::fs;
+
 use anyhow::{anyhow, Result};
 use ent_proto::ent::{
     graph_service_server::GraphServiceServer, schema_service_server::SchemaServiceServer,
 };
 use sqlx::postgres::PgPoolOptions;
 use tonic::transport::Server;
-use tracing::info;
+use tracing::{error, info};
 
-use ent_server::{config::Settings, GraphServer, SchemaServer};
+use ent_server::{auth::JwtValidator, config::Settings, GraphServer, SchemaServer};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
-    let settings = Settings::new()?;
-    let addr = settings.server_address().parse()?;
+    let settings = Settings::new().map_err(|e| {
+        error!(error = e.to_string());
+        e
+    })?;
+
+    let addr = settings.server_address().parse().map_err(|e| {
+        error!("Error parsing server address: {}", e);
+        e
+    })?;
+
+    info!(path = &settings.jwt.public_key_path);
+
+    let public_key = fs::read_to_string(&settings.jwt.public_key_path).map_err(|e| {
+        error!("failed to read pem file: {}", e);
+        e
+    })?;
+
+    JwtValidator::init(&public_key, settings.jwt.issuer.clone()).map_err(|e| {
+        error!("failed to initialize JWT validator: {}", e);
+        e
+    })?;
 
     let pool = PgPoolOptions::new()
         .max_connections(settings.database.max_connections)

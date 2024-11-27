@@ -2,8 +2,9 @@ use crate::auth::AuthenticatedRequest;
 use crate::db::graph::{GraphRepository, Object};
 use ent_proto::ent::graph_service_server::GraphService;
 use ent_proto::ent::{
-    CreateObjectRequest, CreateObjectResponse, GetEdgeRequest, GetEdgeResponse, GetEdgesRequest,
-    GetEdgesResponse, GetObjectRequest, GetObjectResponse, Object as ProtoObject,
+    CreateEdgeRequest, CreateEdgeResponse, CreateObjectRequest, CreateObjectResponse,
+    GetEdgeRequest, GetEdgeResponse, GetEdgesRequest, GetEdgesResponse, GetObjectRequest,
+    GetObjectResponse, Object as ProtoObject,
 };
 use prost_types::Struct;
 use prost_types::Value as ProstValue;
@@ -155,6 +156,28 @@ impl GraphService for GraphServer {
 
         Ok(Response::new(CreateObjectResponse {
             object: Some(object.to_pb()),
+            revision: revision.to_zookie().ok(), // Fill this in based on your revision tracking
+        }))
+    }
+
+    async fn create_edge(
+        &self,
+        request: Request<CreateEdgeRequest>,
+    ) -> Result<Response<CreateEdgeResponse>, Status> {
+        let user_id = request.user_id()?;
+
+        let req = request.into_inner();
+
+        // Use the user_id when creating the object
+        // This would be stored in your database along with the object
+        let (edge, revision) = self
+            .repository
+            .create_edge(user_id, req)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(CreateEdgeResponse {
+            edge: Some(edge.to_pb()),
             revision: revision.to_zookie().ok(), // Fill this in based on your revision tracking
         }))
     }

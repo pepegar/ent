@@ -40,7 +40,7 @@ impl FromStr for PgSnapshot {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let parts: Vec<&str> = s.split(':').collect();
         if parts.len() != 3 {
-            return Err(SnapshotError("Invalid snapshot format".to_string()));
+            return Err(SnapshotError(format!("Invalid snapshot format {:?}", s)));
         }
 
         let xmin = parts[0]
@@ -195,7 +195,7 @@ impl Transaction {
             INSERT INTO relation_tuple_transaction DEFAULT VALUES 
             RETURNING
                     xid as "xid!: Xid8",
-                    snapshot as "snapshot!: PgSnapshot",
+                    snapshot::text as "snapshot!: PgSnapshot",
                     metadata as "metadata: Json<serde_json::Value>"
             "#
         )

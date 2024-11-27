@@ -25,13 +25,6 @@
       enable = true;
       components = ["rustc" "cargo" "clippy" "rustfmt" "rust-analyzer"];
     };
-    python = {
-      enable = true;
-      venv.enable = true;
-      venv.requirements = ''
-        files-to-prompt==0.4
-      '';
-    };
   };
 
   services.postgres = {

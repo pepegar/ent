@@ -3,9 +3,9 @@ use serde::Deserialize;
 use std::env;
 
 #[derive(Debug, Deserialize)]
-pub struct AuthConfig {
-    pub jwt_public_key: String,
-    pub jwt_issuer: String,
+pub struct JwtConfig {
+    pub public_key_path: String,
+    pub issuer: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -13,7 +13,6 @@ pub struct ServerConfig {
     pub host: String,
     pub port: u16,
     pub max_connections: u32,
-    pub auth: AuthConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,6 +26,7 @@ pub struct DatabaseConfig {
 pub struct Settings {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
+    pub jwt: JwtConfig,
 }
 
 impl Settings {

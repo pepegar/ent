@@ -7,3 +7,7 @@ database:
   url: "postgres://ent:ent_password@postgres:5432/ent"
   max_connections: 5
   timeout_seconds: 3
+
+jwt:
+  public_key_path: /Users/pepe/projects/github.com/pepegar/ent/test/data/public.pem
+  issuer: "ent"

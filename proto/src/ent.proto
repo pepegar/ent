@@ -29,9 +29,20 @@ message ConsistencyRequirement {
 }
 
 // Core object type used across services
+message Edge {
+  int64 id = 1;                        // Unique identifier for the edge
+  int64 from_id = 2;                   // Unique identifier for the origin object
+  string from_type = 3;                 // Unique identifier for the origin object
+  int64 to_id = 4;                     // Unique identifier for the destination object
+  string to_type = 5;                   // Unique identifier for the destination object
+  string relation = 6;                 // relation name
+  google.protobuf.Struct metadata = 7; // Object properties and data
+}
+
+// Core object type used across services
 message Object {
-  int64 id = 1;                      // Unique identifier for the object
-  string type = 2;                    // Object type/schema name
+  int64 id = 1;                        // Unique identifier for the object
+  string type = 2;                     // Object type/schema name
   google.protobuf.Struct metadata = 3; // Object properties and data
 }
 
@@ -49,6 +60,9 @@ service GraphService {
 
   // Create a new object
   rpc CreateObject(CreateObjectRequest) returns (CreateObjectResponse);
+
+  // Create a new edge
+  rpc CreateEdge(CreateEdgeRequest) returns (CreateEdgeResponse);
 }
 
 message GetObjectRequest {
@@ -90,6 +104,20 @@ message CreateObjectRequest {
 
 message CreateObjectResponse {
   Object object = 1;                         // Created object
+  Zookie revision = 2;                       // Revision at which object was created
+}
+
+message CreateEdgeRequest {
+  int64 from_id = 1;                   // Unique identifier for the origin object
+  string from_type = 2;                // Unique identifier for the origin object
+  int64 to_id = 3;                     // Unique identifier for the destination object
+  string to_type = 4;                  // Unique identifier for the destination object
+  string relation = 5;                 // relation name
+  google.protobuf.Struct metadata = 6; // Edge properties and data
+}
+
+message CreateEdgeResponse {
+  Edge edge = 1;                         // Created object
   Zookie revision = 2;                       // Revision at which object was created
 }
 
