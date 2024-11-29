@@ -12,7 +12,7 @@ struct Claims {
 }
 
 pub fn generate_test_token(user_id: &str) -> Result<String> {
-    let private_key = fs::read_to_string("test/data/private.pem")?;
+    let private_key = fs::read_to_string("../test/data/private.pem")?;
     let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes())?;
 
     // Set expiration to 1 hour from now

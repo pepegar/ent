@@ -1,5 +1,6 @@
 use anyhow::Result;
-use ent::{config::Settings, server::ent::schema_service_client::SchemaServiceClient};
+use ent_proto::ent::{schema_service_client::SchemaServiceClient, CreateSchemaRequest};
+use ent_server::config::Settings;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
@@ -9,6 +10,10 @@ use uuid::Uuid;
 /// Test utilities and fixtures
 mod common {
     use super::*;
+    use ent_proto::ent::{
+        graph_service_server::GraphServiceServer, schema_service_server::SchemaServiceServer,
+    };
+    use ent_server::{GraphServer, SchemaServer};
     use once_cell::sync::Lazy;
     use sqlx::{Pool, Postgres};
     use std::sync::Mutex;
@@ -45,7 +50,7 @@ mod common {
             .await?;
 
         // Run migrations
-        sqlx::migrate!("./migrations").run(&pool).await?;
+        sqlx::migrate!("../migrations").run(&pool).await?;
 
         Ok(pool)
     }
@@ -64,7 +69,7 @@ mod common {
         let addr = get_test_server_address().await?;
 
         // Create test settings
-        let mut settings = Settings::new()?;
+        let mut settings = Settings::new_from_folder("..".to_string())?;
         settings.server.host = addr.ip().to_string();
         settings.server.port = addr.port();
 
@@ -74,18 +79,12 @@ mod common {
 
         // Spawn the server in the background
         tokio::spawn(async move {
-            let schema_server = ent::server::SchemaServer::new(schema_pool);
-            let graph_server = ent::server::GraphServer::new(graph_pool);
+            let schema_server = SchemaServer::new(schema_pool);
+            let graph_server = GraphServer::new(graph_pool);
 
             Server::builder()
-                .add_service(
-                    ent::server::ent::schema_service_server::SchemaServiceServer::new(
-                        schema_server,
-                    ),
-                )
-                .add_service(
-                    ent::server::ent::graph_service_server::GraphServiceServer::new(graph_server),
-                )
+                .add_service(SchemaServiceServer::new(schema_server))
+                .add_service(GraphServiceServer::new(graph_server))
                 .serve(addr)
                 .await
                 .expect("Failed to start test server");
@@ -107,7 +106,8 @@ async fn test_create_schema() -> Result<()> {
     let mut client = SchemaServiceClient::connect(address).await?;
 
     // Create a test schema
-    let request = tonic::Request::new(ent::server::ent::CreateSchemaRequest {
+    let request = tonic::Request::new(CreateSchemaRequest {
+        description: "Test schema".to_string(),
         schema: r#"{
             "type": "object",
             "properties": {
@@ -132,7 +132,8 @@ async fn test_invalid_schema() -> Result<()> {
     let mut client = SchemaServiceClient::connect(address).await?;
 
     // Try to create an invalid schema
-    let request = tonic::Request::new(ent::server::ent::CreateSchemaRequest {
+    let request = tonic::Request::new(CreateSchemaRequest {
+        description: "Invalid schema".to_string(),
         schema: r#"{ invalid json }"#.to_string(),
     });
 
