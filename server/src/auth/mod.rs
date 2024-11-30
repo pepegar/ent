@@ -38,10 +38,14 @@ impl JwtValidator {
 
     // Initialize the global JWT validator
     pub fn init(public_key_pem: &str, issuer: String) -> Result<()> {
-        let validator = JwtValidator::new(public_key_pem, issuer)?;
-        JWT_VALIDATOR
-            .set(validator)
-            .map_err(|_| anyhow::anyhow!("JWT Validator has already been initialized"))
+        if JWT_VALIDATOR.get().is_some() {
+            return Ok(());
+        } else {
+            let validator = JwtValidator::new(public_key_pem, issuer)?;
+            JWT_VALIDATOR
+                .set(validator)
+                .map_err(|_| anyhow::anyhow!("JWT Validator has already been initialized"))
+        }
     }
 
     // Get the global JWT validator instance

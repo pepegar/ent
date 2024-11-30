@@ -1,11 +1,15 @@
 use anyhow::Result;
 use ent_proto::ent::{schema_service_client::SchemaServiceClient, CreateSchemaRequest};
 use ent_server::config::Settings;
+use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
+use test_helper::EntTestBuilder;
 use tokio::net::TcpListener;
 use tonic::transport::Server;
 use uuid::Uuid;
+
+mod test_helper;
 
 /// Test utilities and fixtures
 mod common {
@@ -17,6 +21,7 @@ mod common {
     use once_cell::sync::Lazy;
     use sqlx::{Pool, Postgres};
     use std::sync::Mutex;
+    use tracing::info;
 
     // Ensure migrations are run only once
     static MIGRATIONS_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -73,6 +78,10 @@ mod common {
         settings.server.host = addr.ip().to_string();
         settings.server.port = addr.port();
 
+        // Initialize JWT validator with test keys
+        let public_key = std::fs::read_to_string("../test/data/public.pem")?;
+        ent_server::auth::JwtValidator::init(&public_key, "ent".to_string())?;
+
         // Clone pool for the server
         let schema_pool = pool.clone();
         let graph_pool = pool.clone();
@@ -92,6 +101,7 @@ mod common {
 
         // Allow the server some time to start
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        info!("Test server ready");
 
         Ok((format!("http://{}", addr), pool))
     }
@@ -140,6 +150,53 @@ async fn test_invalid_schema() -> Result<()> {
     // Should return an error
     let response = client.create_schema(request).await;
     assert!(response.is_err());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_complex_scenario() -> Result<()> {
+    let (address, _pool) = common::spawn_app().await?;
+
+    let state = EntTestBuilder::new()
+        .with_schema(
+            r#"{
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" }
+            }
+        }"#,
+        )
+        .with_user("user1")
+        .with_user("user2")
+        .with_object(
+            0,
+            "document",
+            json!({
+                "name": "Doc 1"
+            }),
+        )
+        .with_object(
+            1,
+            "document",
+            json!({
+                "name": "Doc 2"
+            }),
+        )
+        .with_edge(
+            0,
+            0,
+            1,
+            "references",
+            json!({
+                "note": "Important reference"
+            }),
+        )
+        .build(address)
+        .await?;
+
+    assert!(state.get_object(0).is_some());
+    assert!(state.get_user_token(0).is_some());
 
     Ok(())
 }
