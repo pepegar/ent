@@ -24,7 +24,6 @@ impl SchemaService for SchemaServer {
         &self,
         request: Request<CreateSchemaRequest>,
     ) -> Result<Response<CreateSchemaResponse>, Status> {
-        info!("Received request to create schema {:?}", request);
         let schema = request.into_inner().schema;
 
         match self.repository.create_schema(&schema).await {

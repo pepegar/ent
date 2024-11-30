@@ -6,6 +6,9 @@ use ent_proto::ent::{
 use ent_server::server::json_value_to_prost_value;
 use prost_types::Struct;
 use serde_json::Value as JsonValue;
+use tracing::info;
+
+use crate::jwt::generate_test_token;
 
 // Represents a user context for testing
 #[derive(Debug, Clone)]
@@ -61,8 +64,7 @@ impl EntTestBuilder {
 
     pub fn with_user(mut self, user_id: impl Into<String>) -> Self {
         let user_id = user_id.into();
-        // Generate a simple test token - we'll enhance this later
-        let token = format!("test-token-{}", user_id);
+        let token = generate_test_token(&user_id).unwrap();
 
         self.users.push(TestUser { id: user_id, token });
         self
@@ -110,7 +112,9 @@ impl EntTestBuilder {
                 schema,
                 description: "Test schema".to_string(),
             };
-            schema_client.create_schema(request).await?;
+            info!(schema = &request.schema);
+            let response = schema_client.create_schema(request).await?;
+            info!(response = ?response);
         }
 
         // Create objects
@@ -121,7 +125,10 @@ impl EntTestBuilder {
                 .metadata_mut()
                 .insert("authorization", format!("Bearer {}", user.token).parse()?);
 
+            info!(request = ?request);
+
             let response = graph_client.create_object(request).await?;
+            info!(response = ?response);
             if let Some(object) = response.into_inner().object {
                 self.created_objects
                     .push(CreatedObject { user_index, object });
@@ -148,7 +155,11 @@ impl EntTestBuilder {
                 .metadata_mut()
                 .insert("authorization", format!("Bearer {}", user.token).parse()?);
 
+            info!(request = ?request);
+
             let response = graph_client.create_edge(request).await?;
+
+            info!(response = ?response);
             if let Some(edge) = response.into_inner().edge {
                 self.created_edges.push(edge);
             }

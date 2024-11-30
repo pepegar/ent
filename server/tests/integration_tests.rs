@@ -9,6 +9,7 @@ use tokio::net::TcpListener;
 use tonic::transport::Server;
 use uuid::Uuid;
 
+mod jwt;
 mod test_helper;
 
 /// Test utilities and fixtures
@@ -22,6 +23,7 @@ mod common {
     use sqlx::{Pool, Postgres};
     use std::sync::Mutex;
     use tracing::info;
+    use tracing_subscriber::fmt::format::FmtSpan;
 
     // Ensure migrations are run only once
     static MIGRATIONS_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -70,6 +72,11 @@ mod common {
     }
 
     pub async fn spawn_app() -> Result<(String, Pool<Postgres>)> {
+        let subscriber = tracing_subscriber::fmt()
+            .with_span_events(FmtSpan::FULL)
+            .with_test_writer()
+            .try_init();
+
         let pool = setup_test_db().await?;
         let addr = get_test_server_address().await?;
 
