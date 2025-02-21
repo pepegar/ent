@@ -13,9 +13,9 @@ use crate::{
     server::{json_value_to_prost_value, prost_value_to_json_value},
 };
 
-use super::transaction::{Revision, Transaction};
+use super::transaction::{ConsistencyMode, Revision, Transaction};
 
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct Object {
     pub id: i64,
     pub type_name: String,
@@ -38,7 +38,7 @@ impl Object {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, sqlx::FromRow)]
 pub struct Edge {
     pub id: i64,
     pub from_type: String,
@@ -199,80 +199,251 @@ impl GraphRepository {
         Ok((object, revision))
     }
     #[instrument(skip(self))]
-    pub async fn get_object(&self, id: i64) -> Result<Option<Object>> {
-        let object = sqlx::query_as!(
-            Object,
-            r#"
-            SELECT 
-                id,
-                type as type_name,
-                metadata as "metadata: Value",
-                created_at as "created_at?: OffsetDateTime",
-                updated_at as "updated_at?: OffsetDateTime"
-            FROM objects
-            WHERE id = $1
-            "#,
-            id
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-
-        Ok(object)
+    pub async fn get_object(
+        &self,
+        id: i64,
+        consistency: ConsistencyMode,
+    ) -> Result<Option<Object>> {
+        match &consistency {
+            ConsistencyMode::Full => sqlx::query_as!(
+                Object,
+                r#"
+                    SELECT 
+                        id,
+                        type as type_name,
+                        metadata as "metadata: Value",
+                        created_at as "created_at?: OffsetDateTime",
+                        updated_at as "updated_at?: OffsetDateTime"
+                    FROM objects
+                    WHERE id = $1
+                    AND created_xid <= pg_current_xact_id()
+                    AND deleted_xid > pg_current_xact_id()
+                    "#,
+                id
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| anyhow!("Failed to fetch object: {}", e)),
+            ConsistencyMode::MinimizeLatency => sqlx::query_as!(
+                Object,
+                r#"
+                    SELECT 
+                        id,
+                        type as type_name,
+                        metadata as "metadata: Value",
+                        created_at as "created_at?: OffsetDateTime",
+                        updated_at as "updated_at?: OffsetDateTime"
+                    FROM objects
+                    WHERE id = $1
+                    "#,
+                id
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| anyhow!("Failed to fetch object: {}", e)),
+            ConsistencyMode::AtLeastAsFresh(_revision) | ConsistencyMode::ExactlyAt(_revision) => {
+                sqlx::query_as!(
+                    Object,
+                    r#"
+                    WITH snapshot AS (
+                        SELECT $2::text::pg_snapshot as snapshot
+                    )
+                    SELECT 
+                        o.id,
+                        o.type as type_name,
+                        o.metadata as "metadata: Value",
+                        o.created_at as "created_at?: OffsetDateTime",
+                        o.updated_at as "updated_at?: OffsetDateTime"
+                    FROM objects o, snapshot s
+                    WHERE o.id = $1
+                    AND o.created_xid <= pg_snapshot_xmax(s.snapshot)
+                    AND o.deleted_xid > pg_snapshot_xmax(s.snapshot)
+                    "#,
+                    id,
+                    _revision.snapshot_string()
+                )
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to fetch object: {}", e))
+            }
+        }
     }
 
     #[instrument(skip(self))]
-    pub async fn get_edge(&self, from_id: i64, relation: &str) -> Result<Option<Edge>> {
-        let edge = sqlx::query_as!(
-            Edge,
-            r#"
-            SELECT 
-                id,
-                from_type,
+    pub async fn get_edge(
+        &self,
+        from_id: i64,
+        relation: &str,
+        consistency: ConsistencyMode,
+    ) -> Result<Option<Edge>> {
+        match &consistency {
+            ConsistencyMode::Full => sqlx::query_as!(
+                Edge,
+                r#"
+                    SELECT 
+                        id,
+                        from_type,
+                        from_id,
+                        relation,
+                        to_type,
+                        to_id,
+                        metadata as "metadata: Value",
+                        created_at as "created_at?: OffsetDateTime",
+                        updated_at as "updated_at?: OffsetDateTime"
+                    FROM triples
+                    WHERE from_id = $1 AND relation = $2
+                    AND created_xid <= pg_current_xact_id()
+                    AND deleted_xid > pg_current_xact_id()
+                    LIMIT 1
+                    "#,
                 from_id,
-                relation,
-                to_type,
-                to_id,
-                metadata as "metadata: Value",
-                created_at as "created_at?: OffsetDateTime",
-                updated_at as "updated_at?: OffsetDateTime"
-            FROM triples
-            WHERE from_id = $1 AND relation = $2
-            LIMIT 1
-            "#,
-            from_id,
-            relation
-        )
-        .fetch_optional(&self.pool)
-        .await?;
-
-        Ok(edge)
+                relation
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| anyhow!("Failed to fetch edge: {}", e)),
+            ConsistencyMode::MinimizeLatency => sqlx::query_as!(
+                Edge,
+                r#"
+                    SELECT 
+                        id,
+                        from_type,
+                        from_id,
+                        relation,
+                        to_type,
+                        to_id,
+                        metadata as "metadata: Value",
+                        created_at as "created_at?: OffsetDateTime",
+                        updated_at as "updated_at?: OffsetDateTime"
+                    FROM triples
+                    WHERE from_id = $1 AND relation = $2
+                    LIMIT 1
+                    "#,
+                from_id,
+                relation
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| anyhow!("Failed to fetch edge: {}", e)),
+            ConsistencyMode::AtLeastAsFresh(_revision) | ConsistencyMode::ExactlyAt(_revision) => {
+                sqlx::query_as!(
+                    Edge,
+                    r#"
+                    WITH snapshot AS (
+                        SELECT $3::text::pg_snapshot as snapshot
+                    )
+                    SELECT 
+                        t.id,
+                        t.from_type,
+                        t.from_id,
+                        t.relation,
+                        t.to_type,
+                        t.to_id,
+                        t.metadata as "metadata: Value",
+                        t.created_at as "created_at?: OffsetDateTime",
+                        t.updated_at as "updated_at?: OffsetDateTime"
+                    FROM triples t, snapshot s
+                    WHERE t.from_id = $1 AND t.relation = $2
+                    AND t.created_xid <= pg_snapshot_xmax(s.snapshot)
+                    AND t.deleted_xid > pg_snapshot_xmax(s.snapshot)
+                    LIMIT 1
+                    "#,
+                    from_id,
+                    relation,
+                    _revision.snapshot_string()
+                )
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to fetch edge: {}", e))
+            }
+        }
     }
 
     #[instrument(skip(self))]
-    pub async fn get_edges(&self, from_id: i64, relation: &str) -> Result<Vec<Edge>> {
-        let edges = sqlx::query_as!(
-            Edge,
-            r#"
-            SELECT 
-                id,
-                from_type,
+    pub async fn get_edges(
+        &self,
+        from_id: i64,
+        relation: &str,
+        consistency: ConsistencyMode,
+    ) -> Result<Vec<Edge>> {
+        match &consistency {
+            ConsistencyMode::Full => sqlx::query_as!(
+                Edge,
+                r#"
+                    SELECT 
+                        id,
+                        from_type,
+                        from_id,
+                        relation,
+                        to_type,
+                        to_id,
+                        metadata as "metadata: Value",
+                        created_at as "created_at?: OffsetDateTime",
+                        updated_at as "updated_at?: OffsetDateTime"
+                    FROM triples
+                    WHERE from_id = $1 AND relation = $2
+                    AND created_xid <= pg_current_xact_id()
+                    AND deleted_xid > pg_current_xact_id()
+                    "#,
                 from_id,
-                relation,
-                to_type,
-                to_id,
-                metadata as "metadata: Value",
-                created_at as "created_at?: OffsetDateTime",
-                updated_at as "updated_at?: OffsetDateTime"
-            FROM triples
-            WHERE from_id = $1 AND relation = $2
-            "#,
-            from_id,
-            relation
-        )
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(edges)
+                relation
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| anyhow!("Failed to fetch edges: {}", e)),
+            ConsistencyMode::MinimizeLatency => sqlx::query_as!(
+                Edge,
+                r#"
+                    SELECT 
+                        id,
+                        from_type,
+                        from_id,
+                        relation,
+                        to_type,
+                        to_id,
+                        metadata as "metadata: Value",
+                        created_at as "created_at?: OffsetDateTime",
+                        updated_at as "updated_at?: OffsetDateTime"
+                    FROM triples
+                    WHERE from_id = $1 AND relation = $2
+                    "#,
+                from_id,
+                relation
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| anyhow!("Failed to fetch edges: {}", e)),
+            ConsistencyMode::AtLeastAsFresh(_revision) | ConsistencyMode::ExactlyAt(_revision) => {
+                sqlx::query_as!(
+                    Edge,
+                    r#"
+                    WITH snapshot AS (
+                        SELECT $3::text::pg_snapshot as snapshot
+                    )
+                    SELECT 
+                        t.id,
+                        t.from_type,
+                        t.from_id,
+                        t.relation,
+                        t.to_type,
+                        t.to_id,
+                        t.metadata as "metadata: Value",
+                        t.created_at as "created_at?: OffsetDateTime",
+                        t.updated_at as "updated_at?: OffsetDateTime"
+                    FROM triples t, snapshot s
+                    WHERE t.from_id = $1 AND t.relation = $2
+                    AND t.created_xid <= pg_snapshot_xmax(s.snapshot)
+                    AND t.deleted_xid > pg_snapshot_xmax(s.snapshot)
+                    "#,
+                    from_id,
+                    relation,
+                    _revision.snapshot_string()
+                )
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to fetch edges: {}", e))
+            }
+        }
     }
 
     #[instrument(skip(self))]
@@ -348,7 +519,11 @@ mod tests {
         let (object, _) =
             insert_object(&repo, "user_id".to_string(), "test object".to_string()).await;
 
-        let retrieved = repo.get_object(object.id).await.unwrap().unwrap();
+        let retrieved = repo
+            .get_object(object.id, ConsistencyMode::Full)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(retrieved.type_name, "test_type");
         assert_eq!(retrieved.metadata["name"], "test object");
     }

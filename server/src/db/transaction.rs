@@ -161,6 +161,10 @@ impl Revision {
         // A revision is greater if it can see transactions the other can't
         self.snapshot.xmax > other.snapshot.xmax
     }
+
+    pub fn snapshot_string(&self) -> String {
+        self.snapshot.to_string()
+    }
 }
 
 /// Consistency mode for queries

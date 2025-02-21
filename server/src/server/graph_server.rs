@@ -1,6 +1,8 @@
 use crate::auth::AuthenticatedRequest;
 use crate::db::graph::{GraphRepository, Object};
 use crate::db::schema::SchemaRepository;
+use crate::db::transaction::{ConsistencyMode, Revision};
+use ent_proto::ent::consistency_requirement::Requirement;
 use ent_proto::ent::graph_service_server::GraphService;
 use ent_proto::ent::{
     CreateEdgeRequest, CreateEdgeResponse, CreateObjectRequest, CreateObjectResponse,
@@ -68,6 +70,24 @@ impl GraphServer {
             }
         }
     }
+
+    fn parse_consistency_requirement(
+        req: Option<ent_proto::ent::ConsistencyRequirement>,
+    ) -> Result<ConsistencyMode, Status> {
+        match req.and_then(|r| r.requirement) {
+            Some(Requirement::FullConsistency(true)) => Ok(ConsistencyMode::Full),
+            Some(Requirement::MinimizeLatency(true)) => Ok(ConsistencyMode::MinimizeLatency),
+            Some(Requirement::AtLeastAsFresh(zookie)) => match Revision::from_zookie(zookie) {
+                Ok(revision) => Ok(ConsistencyMode::AtLeastAsFresh(revision)),
+                Err(_) => Err(Status::invalid_argument("Invalid zookie format")),
+            },
+            Some(Requirement::ExactlyAt(zookie)) => match Revision::from_zookie(zookie) {
+                Ok(revision) => Ok(ConsistencyMode::ExactlyAt(revision)),
+                Err(_) => Err(Status::invalid_argument("Invalid zookie format")),
+            },
+            _ => Ok(ConsistencyMode::MinimizeLatency), // Default to minimize latency
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -78,8 +98,9 @@ impl GraphService for GraphServer {
         request: Request<GetObjectRequest>,
     ) -> Result<Response<GetObjectResponse>, Status> {
         let req = request.into_inner();
+        let consistency = Self::parse_consistency_requirement(req.consistency)?;
 
-        match self.repository.get_object(req.object_id).await {
+        match self.repository.get_object(req.object_id, consistency).await {
             Ok(Some(obj)) => Ok(Response::new(GetObjectResponse {
                 object: Some(Self::to_proto_object(obj)),
             })),
@@ -97,15 +118,16 @@ impl GraphService for GraphServer {
         request: Request<GetEdgeRequest>,
     ) -> Result<Response<GetEdgeResponse>, Status> {
         let req = request.into_inner();
+        let consistency = Self::parse_consistency_requirement(req.consistency)?;
 
         match self
             .repository
-            .get_edge(req.object_id, &req.edge_type)
+            .get_edge(req.object_id, &req.edge_type, consistency.clone())
             .await
         {
             Ok(Some(edge)) => {
-                // Get the target object
-                match self.repository.get_object(edge.to_id).await {
+                // Get the target object with the same consistency requirement
+                match self.repository.get_object(edge.to_id, consistency).await {
                     Ok(Some(obj)) => Ok(Response::new(GetEdgeResponse {
                         object: Some(Self::to_proto_object(obj)),
                     })),
@@ -130,16 +152,21 @@ impl GraphService for GraphServer {
         request: Request<GetEdgesRequest>,
     ) -> Result<Response<GetEdgesResponse>, Status> {
         let req = request.into_inner();
+        let consistency = Self::parse_consistency_requirement(req.consistency)?;
 
         match self
             .repository
-            .get_edges(req.object_id, &req.edge_type)
+            .get_edges(req.object_id, &req.edge_type, consistency.clone())
             .await
         {
             Ok(edges) => {
                 let mut objects = Vec::new();
                 for edge in edges {
-                    match self.repository.get_object(edge.to_id).await {
+                    match self
+                        .repository
+                        .get_object(edge.to_id, consistency.clone())
+                        .await
+                    {
                         Ok(Some(obj)) => {
                             objects.push(Self::to_proto_object(obj));
                         }
