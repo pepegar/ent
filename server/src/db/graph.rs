@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use ent_proto::ent::{
     CreateEdgeRequest, CreateObjectRequest, Edge as ProtoEdge, Object as ProtoObject,
 };
-use prost_types::Value as ProstValue;
+use prost_types::{Struct, Value as ProstValue};
 use serde_json::Value;
 use sqlx::PgPool;
 use time::OffsetDateTime;
@@ -19,23 +19,70 @@ use super::transaction::{ConsistencyMode, Revision, Transaction};
 pub struct Object {
     pub id: i64,
     pub type_name: String,
+    pub created_at: Option<OffsetDateTime>,
+    pub updated_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct ObjectWithMetadata {
+    pub id: i64,
+    pub type_name: String,
     pub metadata: Value,
     pub created_at: Option<OffsetDateTime>,
     pub updated_at: Option<OffsetDateTime>,
 }
 
-impl Object {
+impl ObjectWithMetadata {
     pub fn to_pb(&self) -> ProtoObject {
-        let json_value = self.metadata.clone();
+        let fields: std::collections::BTreeMap<String, ProstValue> = match &self.metadata {
+            Value::Object(map) => map
+                .into_iter()
+                .map(|(k, v)| (k.clone(), json_value_to_prost_value(v.clone())))
+                .collect(),
+            _ => std::collections::BTreeMap::new(),
+        };
+
+        let metadata = if fields.is_empty() {
+            None
+        } else {
+            Some(Struct { fields })
+        };
+
         ProtoObject {
             id: self.id,
             r#type: self.type_name.clone(),
-            metadata: match json_value_to_prost_value(json_value).kind {
-                Some(prost_types::value::Kind::StructValue(v)) => Some(v),
-                _ => todo!(),
-            },
+            metadata,
         }
     }
+}
+
+impl Object {
+    pub fn to_pb(&self, metadata: Value) -> ProtoObject {
+        let fields: std::collections::BTreeMap<String, ProstValue> = match metadata {
+            Value::Object(map) => map
+                .into_iter()
+                .map(|(k, v)| (k, json_value_to_prost_value(v)))
+                .collect(),
+            _ => std::collections::BTreeMap::new(),
+        };
+
+        let metadata = if fields.is_empty() {
+            None
+        } else {
+            Some(Struct { fields })
+        };
+
+        ProtoObject {
+            id: self.id,
+            r#type: self.type_name.clone(),
+            metadata,
+        }
+    }
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct MetadataRecord {
+    metadata: Value,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -83,12 +130,15 @@ impl GraphRepository {
         &self,
         user_id: String,
         request: CreateObjectRequest,
-    ) -> Result<(Object, Revision)> {
-        let metadata: ProstValue = match request.metadata {
-            Some(v) => ProstValue {
-                kind: Some(prost_types::value::Kind::StructValue(v)),
-            },
-            None => ProstValue::default(),
+    ) -> Result<(ObjectWithMetadata, Revision)> {
+        let metadata: Value = match request.metadata {
+            Some(v) => {
+                let prost_value = ProstValue {
+                    kind: Some(prost_types::value::Kind::StructValue(v)),
+                };
+                prost_value_to_json_value(prost_value)
+            }
+            None => Value::Object(serde_json::Map::new()),
         };
 
         let mut tx = self.pool.begin().await?;
@@ -102,21 +152,18 @@ impl GraphRepository {
             r#"
                 INSERT INTO objects (
                     type, 
-                    metadata, 
                     user_id,
                     created_xid,
                     deleted_xid
                 )
-                VALUES ($1, $2, $3, $4, $5)
+                VALUES ($1, $2, $3, $4)
                 RETURNING 
                     id, 
                     type as type_name, 
-                    metadata as "metadata: Value",
                     created_at as "created_at?: OffsetDateTime",
                     updated_at as "updated_at?: OffsetDateTime"
             "#,
             request.r#type,
-            prost_value_to_json_value(metadata),
             user_id,
             transaction.xid as _, // The current transaction's XID
             Xid8::max() as _,     // Max XID value for "not deleted"
@@ -125,12 +172,41 @@ impl GraphRepository {
         .await
         .map_err(|e| anyhow!("Failed to create object: {}", e))?;
 
+        // Create initial metadata entry
+        sqlx::query!(
+            r#"
+                INSERT INTO object_metadata_history (
+                    object_id,
+                    metadata,
+                    created_xid,
+                    deleted_xid
+                )
+                VALUES ($1, $2, $3, $4)
+            "#,
+            object.id,
+            metadata,
+            transaction.xid as _,
+            Xid8::max() as _,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to create metadata: {}", e))?;
+
         info!("Created object: {:?}", object);
 
         // Commit the transaction
         tx.commit().await?;
 
-        Ok((object, revision))
+        Ok((
+            ObjectWithMetadata {
+                id: object.id,
+                type_name: object.type_name,
+                metadata,
+                created_at: object.created_at,
+                updated_at: object.updated_at,
+            },
+            revision,
+        ))
     }
 
     pub async fn create_edge(
@@ -198,49 +274,137 @@ impl GraphRepository {
 
         Ok((object, revision))
     }
+
+    pub async fn update_object(
+        &self,
+        user_id: String,
+        object_id: i64,
+        metadata: Value,
+    ) -> Result<(ObjectWithMetadata, Revision)> {
+        let mut tx = self.pool.begin().await?;
+        let transaction = Transaction::create(&mut tx).await?;
+
+        let revision = transaction.revision();
+
+        // Mark the current metadata version as deleted
+        sqlx::query!(
+            r#"
+            UPDATE object_metadata_history
+            SET deleted_xid = $1
+            WHERE object_id = $2
+            AND deleted_xid = $3
+            "#,
+            transaction.xid as _,
+            object_id,
+            Xid8::max() as _,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to update metadata: {}", e))?;
+
+        // Create new metadata version
+        sqlx::query!(
+            r#"
+            INSERT INTO object_metadata_history (
+                object_id,
+                metadata,
+                created_xid,
+                deleted_xid
+            )
+            VALUES ($1, $2, $3, $4)
+            "#,
+            object_id,
+            metadata,
+            transaction.xid as _,
+            Xid8::max() as _,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to create metadata: {}", e))?;
+
+        // Update the object's updated_at timestamp
+        let object = sqlx::query_as!(
+            Object,
+            r#"
+            UPDATE objects
+            SET updated_at = NOW(),
+                user_id = $1
+            WHERE id = $2
+            RETURNING 
+                id,
+                type as type_name,
+                created_at as "created_at?: OffsetDateTime",
+                updated_at as "updated_at?: OffsetDateTime"
+            "#,
+            user_id,
+            object_id,
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to update object: {}", e))?;
+
+        // Commit the transaction
+        tx.commit().await?;
+
+        info!(
+            user_id = %user_id,
+            object_id = object.id,
+            "Updated object"
+        );
+
+        Ok((
+            ObjectWithMetadata {
+                id: object.id,
+                type_name: object.type_name,
+                metadata,
+                created_at: object.created_at,
+                updated_at: object.updated_at,
+            },
+            revision,
+        ))
+    }
+
     #[instrument(skip(self))]
     pub async fn get_object(
         &self,
         id: i64,
         consistency: ConsistencyMode,
-    ) -> Result<Option<Object>> {
-        match &consistency {
+    ) -> Result<Option<ObjectWithMetadata>> {
+        let object = match &consistency {
             ConsistencyMode::Full => sqlx::query_as!(
                 Object,
                 r#"
                     SELECT 
-                        id,
-                        type as type_name,
-                        metadata as "metadata: Value",
-                        created_at as "created_at?: OffsetDateTime",
-                        updated_at as "updated_at?: OffsetDateTime"
-                    FROM objects
-                    WHERE id = $1
-                    AND created_xid <= pg_current_xact_id()
-                    AND deleted_xid > pg_current_xact_id()
+                        o.id,
+                        o.type as type_name,
+                        o.created_at as "created_at?: OffsetDateTime",
+                        o.updated_at as "updated_at?: OffsetDateTime"
+                    FROM objects o
+                    WHERE o.id = $1
+                    AND o.created_xid <= pg_current_xact_id()
+                    AND o.deleted_xid > pg_current_xact_id()
                     "#,
                 id
             )
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| anyhow!("Failed to fetch object: {}", e)),
+            .map_err(|e| anyhow!("Failed to fetch object: {}", e))?,
             ConsistencyMode::MinimizeLatency => sqlx::query_as!(
                 Object,
                 r#"
                     SELECT 
-                        id,
-                        type as type_name,
-                        metadata as "metadata: Value",
-                        created_at as "created_at?: OffsetDateTime",
-                        updated_at as "updated_at?: OffsetDateTime"
-                    FROM objects
-                    WHERE id = $1
+                        o.id,
+                        o.type as type_name,
+                        o.created_at as "created_at?: OffsetDateTime",
+                        o.updated_at as "updated_at?: OffsetDateTime"
+                    FROM objects o
+                    WHERE o.id = $1
                     "#,
                 id
             )
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| anyhow!("Failed to fetch object: {}", e)),
+            .map_err(|e| anyhow!("Failed to fetch object: {}", e))?,
             ConsistencyMode::AtLeastAsFresh(_revision) | ConsistencyMode::ExactlyAt(_revision) => {
                 sqlx::query_as!(
                     Object,
@@ -251,7 +415,6 @@ impl GraphRepository {
                     SELECT 
                         o.id,
                         o.type as type_name,
-                        o.metadata as "metadata: Value",
                         o.created_at as "created_at?: OffsetDateTime",
                         o.updated_at as "updated_at?: OffsetDateTime"
                     FROM objects o, snapshot s
@@ -264,8 +427,71 @@ impl GraphRepository {
                 )
                 .fetch_optional(&self.pool)
                 .await
-                .map_err(|e| anyhow!("Failed to fetch object: {}", e))
+                .map_err(|e| anyhow!("Failed to fetch object: {}", e))?
             }
+        };
+
+        if let Some(object) = object {
+            // Get the metadata for the object based on consistency mode
+            let metadata = match &consistency {
+                ConsistencyMode::Full => sqlx::query_as!(
+                    MetadataRecord,
+                    r#"
+                        SELECT metadata
+                        FROM object_metadata_history
+                        WHERE object_id = $1
+                        AND created_xid <= pg_current_xact_id()
+                        AND deleted_xid > pg_current_xact_id()
+                        "#,
+                    id
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to fetch metadata: {}", e))?,
+                ConsistencyMode::MinimizeLatency => sqlx::query_as!(
+                    MetadataRecord,
+                    r#"
+                        SELECT metadata
+                        FROM object_metadata_history
+                        WHERE object_id = $1
+                        ORDER BY created_xid DESC
+                        LIMIT 1
+                        "#,
+                    id
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to fetch metadata: {}", e))?,
+                ConsistencyMode::AtLeastAsFresh(_revision)
+                | ConsistencyMode::ExactlyAt(_revision) => sqlx::query_as!(
+                    MetadataRecord,
+                    r#"
+                        WITH snapshot AS (
+                            SELECT $2::text::pg_snapshot as snapshot
+                        )
+                        SELECT metadata
+                        FROM object_metadata_history h, snapshot s
+                        WHERE h.object_id = $1
+                        AND h.created_xid <= pg_snapshot_xmax(s.snapshot)
+                        AND h.deleted_xid > pg_snapshot_xmax(s.snapshot)
+                        "#,
+                    id,
+                    _revision.snapshot_string()
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to fetch metadata: {}", e))?,
+            };
+
+            Ok(Some(ObjectWithMetadata {
+                id: object.id,
+                type_name: object.type_name,
+                metadata: metadata.metadata,
+                created_at: object.created_at,
+                updated_at: object.updated_at,
+            }))
+        } else {
+            Ok(None)
         }
     }
 
@@ -457,12 +683,15 @@ impl GraphRepository {
             SELECT 
                 o.id,
                 o.type as "type_name",
-                o.metadata as "metadata: Value",
                 o.created_at as "created_at?: OffsetDateTime",
-                o.updated_at as "updated_at?: OffsetDateTime"
+                o.updated_at as "updated_at?: OffsetDateTime",
+                h.metadata as "metadata: Value"
             FROM triples t
             JOIN objects o ON t.to_id = o.id
+            JOIN object_metadata_history h ON o.id = h.object_id
             WHERE t.from_id = $1 AND t.relation = $2
+            AND h.created_xid <= pg_current_xact_id()
+            AND h.deleted_xid > pg_current_xact_id()
             "#,
             from_id,
             relation
@@ -474,13 +703,15 @@ impl GraphRepository {
             Ok(rows) => {
                 let objects = rows
                     .into_iter()
-                    .map(|row| ProtoObject {
-                        id: row.id,
-                        r#type: row.type_name,
-                        metadata: match json_value_to_prost_value(row.metadata).kind {
-                            Some(prost_types::value::Kind::StructValue(v)) => Some(v),
-                            _ => todo!(),
-                        },
+                    .map(|row| {
+                        let obj = ObjectWithMetadata {
+                            id: row.id,
+                            type_name: row.type_name,
+                            metadata: row.metadata,
+                            created_at: row.created_at,
+                            updated_at: row.updated_at,
+                        };
+                        obj.to_pb()
                     })
                     .collect();
 
@@ -525,7 +756,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(retrieved.type_name, "test_type");
-        assert_eq!(retrieved.metadata["name"], "test object");
+        assert_eq!(retrieved.metadata["name"].as_str().unwrap(), "test object");
     }
 
     #[tokio::test]
@@ -554,7 +785,7 @@ mod tests {
         repo: &GraphRepository,
         user_id: String,
         object_name: String,
-    ) -> (Object, Revision) {
+    ) -> (ObjectWithMetadata, Revision) {
         return repo
             .create_object(
                 user_id,
@@ -578,8 +809,8 @@ mod tests {
         repo: &GraphRepository,
         user_id: String,
         relation: String,
-        from: &Object,
-        to: &Object,
+        from: &ObjectWithMetadata,
+        to: &ObjectWithMetadata,
     ) -> (Edge, Revision) {
         return repo
             .create_edge(

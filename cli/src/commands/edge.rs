@@ -77,9 +77,8 @@ pub async fn execute_get_edge(
 
     let mut request = tonic::Request::new(GetEdgeRequest {
         object_id: cmd.object_id,
-        user_token: String::new(), // Deprecated field
         edge_type: cmd.edge_type,
-        consistency,
+        consistency: None,
     });
 
     if let Some(token) = auth {
@@ -103,9 +102,8 @@ pub async fn execute_get_edges(
 
     let mut request = tonic::Request::new(GetEdgesRequest {
         object_id: cmd.object_id,
-        user_token: String::new(), // Deprecated field
         edge_type: cmd.edge_type,
-        consistency,
+        consistency: None,
     });
 
     if let Some(token) = auth {

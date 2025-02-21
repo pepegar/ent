@@ -32,11 +32,11 @@ message ConsistencyRequirement {
 message Edge {
   int64 id = 1;                        // Unique identifier for the edge
   int64 from_id = 2;                   // Unique identifier for the origin object
-  string from_type = 3;                 // Unique identifier for the origin object
+  string from_type = 3;                // Type of the origin object
   int64 to_id = 4;                     // Unique identifier for the destination object
-  string to_type = 5;                   // Unique identifier for the destination object
+  string to_type = 5;                  // Type of the destination object
   string relation = 6;                 // relation name
-  google.protobuf.Struct metadata = 7; // Object properties and data
+  google.protobuf.Struct metadata = 7; // Edge properties and data
 }
 
 // Core object type used across services
@@ -63,11 +63,13 @@ service GraphService {
 
   // Create a new edge
   rpc CreateEdge(CreateEdgeRequest) returns (CreateEdgeResponse);
+
+  // Update an existing object
+  rpc UpdateObject(UpdateObjectRequest) returns (UpdateObjectResponse);
 }
 
 message GetObjectRequest {
   int64 object_id = 1;                       // ID of object to retrieve
-  string user_token = 2;                      // Authentication token 
   ConsistencyRequirement consistency = 3;     // Read consistency requirements
 }
 
@@ -77,8 +79,7 @@ message GetObjectResponse {
 
 message GetEdgeRequest {
   int64 object_id = 1;                       // Source object ID
-  string user_token = 2;                      // Authentication token
-  string edge_type = 3;                       // Type of edge to retrieve
+  string edge_type = 3;                      // Type of edge to retrieve
   ConsistencyRequirement consistency = 4;     // Read consistency requirements
 }
 
@@ -88,8 +89,7 @@ message GetEdgeResponse {
 
 message GetEdgesRequest {
   int64 object_id = 1;                       // Source object ID
-  string user_token = 2;                      // Authentication token
-  string edge_type = 3;                       // Type of edges to retrieve
+  string edge_type = 3;                      // Type of edges to retrieve
   ConsistencyRequirement consistency = 4;     // Read consistency requirements
 }
 
@@ -109,16 +109,26 @@ message CreateObjectResponse {
 
 message CreateEdgeRequest {
   int64 from_id = 1;                   // Unique identifier for the origin object
-  string from_type = 2;                // Unique identifier for the origin object
+  string from_type = 2;                // Type of the origin object
   int64 to_id = 3;                     // Unique identifier for the destination object
-  string to_type = 4;                  // Unique identifier for the destination object
+  string to_type = 4;                  // Type of the destination object
   string relation = 5;                 // relation name
   google.protobuf.Struct metadata = 6; // Edge properties and data
 }
 
 message CreateEdgeResponse {
-  Edge edge = 1;                         // Created object
-  Zookie revision = 2;                       // Revision at which object was created
+  Edge edge = 1;                            // Created edge
+  Zookie revision = 2;                      // Revision at which edge was created
+}
+
+message UpdateObjectRequest {
+  int64 object_id = 1;                 // ID of object to update
+  google.protobuf.Struct metadata = 2; // Updated object properties and data
+}
+
+message UpdateObjectResponse {
+  Object object = 1;                   // Updated object
+  Zookie revision = 2;                 // Revision marker for this operation
 }
 
 // Schema Service - Handles schema definitions and evolution

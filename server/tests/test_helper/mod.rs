@@ -28,8 +28,9 @@ pub struct TestUser {
 #[derive(Debug, Clone)]
 pub struct CreatedObject {
     #[allow(dead_code)]
-    user_index: usize,
-    object: Object,
+    pub user_index: usize,
+    pub object: Object,
+    pub revision: ent_proto::ent::Zookie,
 }
 
 // Edge creation request with object indices
@@ -54,7 +55,7 @@ pub struct EntTestBuilder {
     created_edges: Vec<Edge>,
 }
 
-fn json_to_protobuf_struct(value: JsonValue) -> Option<Struct> {
+pub fn json_to_protobuf_struct(value: JsonValue) -> Option<Struct> {
     match json_value_to_prost_value(value).kind {
         Some(prost_types::value::Kind::StructValue(s)) => Some(s),
         _ => None,
@@ -226,9 +227,13 @@ impl EntTestBuilder {
 
             let response = graph_client.create_object(request).await?;
             info!(response = ?response);
-            if let Some(object) = response.into_inner().object {
-                self.created_objects
-                    .push(CreatedObject { user_index, object });
+            let response = response.into_inner();
+            if let (Some(object), Some(revision)) = (response.object, response.revision) {
+                self.created_objects.push(CreatedObject {
+                    user_index,
+                    object,
+                    revision,
+                });
             }
         }
 
@@ -326,6 +331,113 @@ impl EntTestBuilder {
             self.created_objects.len(),
             self.created_edges.len()
         )
+    }
+
+    // Add new methods for object creation and attribution
+
+    /// Creates an object with the given type and metadata, attributed to the user at the given index
+    pub fn with_attributed_object(
+        mut self,
+        user_index: usize,
+        type_name: impl Into<String>,
+        metadata: impl Into<JsonValue>,
+    ) -> Self {
+        let request = CreateObjectRequest {
+            r#type: type_name.into(),
+            metadata: json_to_protobuf_struct(metadata.into()),
+        };
+
+        self.objects_to_create.push((user_index, request));
+        self
+    }
+
+    /// Creates multiple objects of the same type, each attributed to a user by index
+    pub fn with_multiple_objects(
+        mut self,
+        user_indices: &[usize],
+        type_name: impl Into<String>,
+        metadata_generator: impl Fn(usize) -> JsonValue,
+    ) -> Self {
+        let type_name = type_name.into();
+        for (i, &user_index) in user_indices.iter().enumerate() {
+            let request = CreateObjectRequest {
+                r#type: type_name.clone(),
+                metadata: json_to_protobuf_struct(metadata_generator(i)),
+            };
+            self.objects_to_create.push((user_index, request));
+        }
+        self
+    }
+
+    /// Creates a chain of connected objects, each attributed to a user
+    pub fn with_object_chain(
+        mut self,
+        user_indices: &[usize],
+        type_name: impl Into<String>,
+        relation: impl Into<String>,
+        metadata_generator: impl Fn(usize) -> JsonValue,
+    ) -> Self {
+        let type_name = type_name.into();
+        let relation = relation.into();
+
+        // Create objects
+        let start_index = self.objects_to_create.len();
+        for (i, &user_index) in user_indices.iter().enumerate() {
+            let request = CreateObjectRequest {
+                r#type: type_name.clone(),
+                metadata: json_to_protobuf_struct(metadata_generator(i)),
+            };
+            self.objects_to_create.push((user_index, request));
+        }
+
+        // Create edges between consecutive objects
+        for i in 0..user_indices.len() - 1 {
+            self.edges_to_create.push(EdgeCreationRequest {
+                user_index: user_indices[i],
+                from_object_index: start_index + i,
+                to_object_index: start_index + i + 1,
+                relation: relation.clone(),
+                metadata: serde_json::json!({}),
+            });
+        }
+        self
+    }
+
+    /// Creates a bidirectional relationship between two objects
+    pub fn with_bidirectional_edge(
+        mut self,
+        user_index: usize,
+        object1_index: usize,
+        object2_index: usize,
+        relation1: impl Into<String>,
+        relation2: impl Into<String>,
+        metadata: impl Into<JsonValue>,
+    ) -> Self {
+        let metadata = metadata.into();
+        self.edges_to_create.push(EdgeCreationRequest {
+            user_index,
+            from_object_index: object1_index,
+            to_object_index: object2_index,
+            relation: relation1.into(),
+            metadata: metadata.clone(),
+        });
+        self.edges_to_create.push(EdgeCreationRequest {
+            user_index,
+            from_object_index: object2_index,
+            to_object_index: object1_index,
+            relation: relation2.into(),
+            metadata,
+        });
+        self
+    }
+
+    /// Gets the index of the last created object
+    pub fn last_object_index(&self) -> Option<usize> {
+        if self.objects_to_create.is_empty() {
+            None
+        } else {
+            Some(self.objects_to_create.len() - 1)
+        }
     }
 }
 

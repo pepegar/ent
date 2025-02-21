@@ -1,5 +1,5 @@
 use crate::auth::AuthenticatedRequest;
-use crate::db::graph::{GraphRepository, Object};
+use crate::db::graph::{GraphRepository, Object, ObjectWithMetadata};
 use crate::db::schema::SchemaRepository;
 use crate::db::transaction::{ConsistencyMode, Revision};
 use ent_proto::ent::consistency_requirement::Requirement;
@@ -7,7 +7,7 @@ use ent_proto::ent::graph_service_server::GraphService;
 use ent_proto::ent::{
     CreateEdgeRequest, CreateEdgeResponse, CreateObjectRequest, CreateObjectResponse,
     GetEdgeRequest, GetEdgeResponse, GetEdgesRequest, GetEdgesResponse, GetObjectRequest,
-    GetObjectResponse, Object as ProtoObject,
+    GetObjectResponse, Object as ProtoObject, UpdateObjectRequest, UpdateObjectResponse,
 };
 use prost_types::Struct;
 use prost_types::Value as ProstValue;
@@ -34,21 +34,25 @@ impl GraphServer {
     }
 
     // Helper function to convert our domain Object to protobuf Object
-    fn to_proto_object(obj: Object) -> ProtoObject {
+    fn to_proto_object(obj: ObjectWithMetadata) -> ProtoObject {
         let fields: std::collections::BTreeMap<String, ProstValue> = match obj.metadata {
             JsonValue::Object(map) => map
                 .into_iter()
                 .map(|(k, v)| (k, json_value_to_prost_value(v.clone())))
                 .collect(),
-            _ => std::collections::BTreeMap::new(), // Handle non-object values
+            _ => std::collections::BTreeMap::new(),
         };
 
-        let metadata = Struct { fields };
+        let metadata = if fields.is_empty() {
+            None
+        } else {
+            Some(Struct { fields })
+        };
 
         ProtoObject {
             id: obj.id,
             r#type: obj.type_name,
-            metadata: Some(metadata),
+            metadata,
         }
     }
 
@@ -221,7 +225,7 @@ impl GraphService for GraphServer {
             .map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(CreateObjectResponse {
-            object: Some(object.to_pb()),
+            object: Some(Self::to_proto_object(object)),
             revision: revision.to_zookie().ok(),
         }))
     }
@@ -245,6 +249,57 @@ impl GraphService for GraphServer {
         Ok(Response::new(CreateEdgeResponse {
             edge: Some(edge.to_pb()),
             revision: revision.to_zookie().ok(), // Fill this in based on your revision tracking
+        }))
+    }
+
+    async fn update_object(
+        &self,
+        request: Request<UpdateObjectRequest>,
+    ) -> Result<Response<UpdateObjectResponse>, Status> {
+        // Extract user ID from JWT
+        let user_id = request.user_id()?;
+        let req = request.into_inner();
+
+        // Convert metadata to JSON for validation
+        let metadata = match &req.metadata {
+            Some(metadata) => {
+                let mut map = serde_json::Map::new();
+                for (k, v) in &metadata.fields {
+                    map.insert(k.clone(), super::prost_value_to_json_value(v.clone()));
+                }
+                JsonValue::Object(map)
+            }
+            None => JsonValue::Object(serde_json::Map::new()),
+        };
+
+        // Get the object to validate its type
+        let existing_object = match self
+            .repository
+            .get_object(req.object_id, ConsistencyMode::Full)
+            .await
+        {
+            Ok(Some(obj)) => obj,
+            Ok(None) => return Err(Status::not_found("Object not found")),
+            Err(e) => {
+                tracing::error!("Failed to get object: {:?}", e);
+                return Err(Status::internal("Failed to get object"));
+            }
+        };
+
+        // Validate against schema if one exists
+        self.validate_object_metadata(&existing_object.type_name, &metadata)
+            .await?;
+
+        // Use the user_id when updating the object
+        let (object, revision) = self
+            .repository
+            .update_object(user_id, req.object_id, metadata)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(UpdateObjectResponse {
+            object: Some(Self::to_proto_object(object)),
+            revision: revision.to_zookie().ok(),
         }))
     }
 }

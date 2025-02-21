@@ -41,8 +41,7 @@ pub async fn execute(
 
     let mut request = tonic::Request::new(GetObjectRequest {
         object_id: cmd.object_id,
-        user_token: String::new(), // Deprecated field
-        consistency,
+        consistency: None,
     });
 
     if let Some(token) = auth {
