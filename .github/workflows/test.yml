@@ -1,0 +1,65 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: ent
+          POSTGRES_PASSWORD: ent_password
+          POSTGRES_DB: ent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        # Install grpcurl
+        curl -sSL "https://github.com/fullstorydev/grpcurl/releases/download/v1.8.9/grpcurl_1.8.9_linux_x86_64.tar.gz" | sudo tar -xz -C /usr/local/bin
+        # Install sqlx-cli
+        cargo install sqlx-cli --no-default-features --features native-tls,postgres
+        # Install other system dependencies
+        sudo apt-get update
+        sudo apt-get install -y openssl
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache dependencies
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Run cargo test
+      run: cargo test
+
+    - name: Run integration tests
+      run: |
+        chmod +x scripts/test-ent.sh
+        ./scripts/test-ent.sh
+      env:
+        RUST_LOG: debug
+        ENT_DATABASE_URL: postgres://ent:ent_password@localhost:5432/ent 
