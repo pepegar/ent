@@ -72,7 +72,7 @@ mod common {
     }
 
     pub async fn spawn_app() -> Result<(String, Pool<Postgres>)> {
-        let subscriber = tracing_subscriber::fmt()
+        let _subscriber = tracing_subscriber::fmt()
             .with_span_events(FmtSpan::FULL)
             .with_test_writer()
             .try_init();
