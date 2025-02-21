@@ -7,7 +7,7 @@ set -e  # Exit on error
 # Function to wait for server to be ready
 wait_for_server() {
     local retries=0
-    local max_retries=30
+    local max_retries=60  # Increased from 30 to 60
     local server=$1
 
     echo "Waiting for server to be ready..."
@@ -113,9 +113,13 @@ echo "Running database migrations..."
 DATABASE_URL=$ENT_DATABASE_URL sqlx database create
 DATABASE_URL=$ENT_DATABASE_URL sqlx migrate run
 
+# Compile the server first
+echo "Compiling server..."
+cargo build --bin ent-server
+
 # Start the server in the background
 echo "Starting server..."
-RUST_LOG=debug cargo run --bin ent-server &
+RUST_LOG=debug ./target/debug/ent-server &
 SERVER_PID=$!
 
 # Ensure we kill the server on script exit
@@ -285,21 +289,15 @@ echo "------------------------"
 # Create test objects
 echo "1. Creating test objects..."
 echo '{
-  "type": "post",
-  "metadata": {
-    "title": "Test Post",
-    "content": "This is a test post"
-  }
+  "title": "Test Post",
+  "content": "This is a test post"
 }' > /tmp/post-object.json
 run_test_case "Create Post Object" "success" \
     create-object --file /tmp/post-object.json --type post
 
 echo '{
-  "type": "user",
-  "metadata": {
-    "name": "Test User",
-    "email": "test@example.com"
-  }
+  "name": "Test User",
+  "email": "test@example.com"
 }' > /tmp/user-object.json
 run_test_case "Create User Object" "success" \
     create-object --file /tmp/user-object.json --type user
