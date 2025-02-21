@@ -133,7 +133,7 @@ impl EntTestBuilder {
             .schema
             .as_ref()
             .expect("Schema must be set for try_create_schema");
-        let type_name_str = format!("test_type_{}", Uuid::new_v4());
+        let type_name_str = format!("test_type_{}", Uuid::new_v4().simple());
         let type_name = self.type_name.as_ref().unwrap_or(&type_name_str);
 
         let request = CreateSchemaRequest {
@@ -193,7 +193,7 @@ impl EntTestBuilder {
         let type_name = if let Some(schema) = self.schema {
             let type_name = self
                 .type_name
-                .unwrap_or_else(|| format!("test_type_{}", Uuid::new_v4()));
+                .unwrap_or_else(|| format!("test_type_{}", Uuid::new_v4().simple()));
             let request = CreateSchemaRequest {
                 schema: schema.to_string(),
                 type_name: type_name.clone(),
