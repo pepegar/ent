@@ -31,18 +31,19 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install dependencies
-      run: |
-        # Install grpcurl
-        curl -sSL "https://github.com/fullstorydev/grpcurl/releases/download/v1.8.9/grpcurl_1.8.9_linux_x86_64.tar.gz" | sudo tar -xz -C /usr/local/bin
-        # Install sqlx-cli
-        cargo install sqlx-cli --no-default-features --features native-tls,postgres
-        # Install other system dependencies
-        sudo apt-get update
-        sudo apt-get install -y openssl
+    - uses: cachix/install-nix-action@v24
+      with:
+        github_access_token: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Set up Rust
-      uses: dtolnay/rust-toolchain@stable
+    - uses: cachix/cachix-action@v12
+      with:
+        name: devenv
+
+    - name: Install devenv.sh
+      run: nix profile install nixpkgs#devenv
+
+    - name: Start devenv shell
+      run: devenv shell
 
     - name: Cache dependencies
       uses: actions/cache@v3
@@ -54,12 +55,12 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
     - name: Run cargo test
-      run: cargo test
+      run: devenv shell cargo test
 
     - name: Run integration tests
       run: |
         chmod +x scripts/test-ent.sh
-        ./scripts/test-ent.sh
+        devenv shell ./scripts/test-ent.sh
       env:
         RUST_LOG: debug
         ENT_DATABASE_URL: postgres://ent:ent_password@localhost:5432/ent 
