@@ -23,9 +23,14 @@ impl SchemaService for SchemaServer {
         &self,
         request: Request<CreateSchemaRequest>,
     ) -> Result<Response<CreateSchemaResponse>, Status> {
-        let schema = request.into_inner().schema;
+        let req = request.into_inner();
+        let type_name = req.type_name.clone();
 
-        match self.repository.create_schema(&schema).await {
+        if type_name.is_empty() {
+            return Err(Status::invalid_argument("type_name is required"));
+        }
+
+        match self.repository.create_schema(&type_name, &req.schema).await {
             Ok(schema) => Ok(Response::new(CreateSchemaResponse {
                 schema_id: schema.id,
             })),

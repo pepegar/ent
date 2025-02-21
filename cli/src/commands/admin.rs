@@ -40,8 +40,9 @@ async fn create_schema(
     let schema = std::fs::read_to_string(cmd.file)?;
 
     let request = tonic::Request::new(CreateSchemaRequest {
-        schema,
+        schema: schema,
         description: cmd.description.unwrap_or_default(),
+        type_name: "admin_type".to_string(),
     });
 
     let response = client.create_schema(request).await?;

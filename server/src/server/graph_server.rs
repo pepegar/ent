@@ -1,5 +1,6 @@
 use crate::auth::AuthenticatedRequest;
 use crate::db::graph::{GraphRepository, Object};
+use crate::db::schema::SchemaRepository;
 use ent_proto::ent::graph_service_server::GraphService;
 use ent_proto::ent::{
     CreateEdgeRequest, CreateEdgeResponse, CreateObjectRequest, CreateObjectResponse,
@@ -17,12 +18,17 @@ use super::json_value_to_prost_value;
 #[derive(Debug)]
 pub struct GraphServer {
     repository: GraphRepository,
+    schema_repository: SchemaRepository,
 }
 
 impl GraphServer {
     pub fn new(pool: PgPool) -> Self {
-        let repository = GraphRepository::new(pool);
-        Self { repository }
+        let repository = GraphRepository::new(pool.clone());
+        let schema_repository = SchemaRepository::new(pool);
+        Self {
+            repository,
+            schema_repository,
+        }
     }
 
     // Helper function to convert our domain Object to protobuf Object
@@ -30,7 +36,7 @@ impl GraphServer {
         let fields: std::collections::BTreeMap<String, ProstValue> = match obj.metadata {
             JsonValue::Object(map) => map
                 .into_iter()
-                .map(|(k, v)| (k, json_value_to_prost_value(v)))
+                .map(|(k, v)| (k, json_value_to_prost_value(v.clone())))
                 .collect(),
             _ => std::collections::BTreeMap::new(), // Handle non-object values
         };
@@ -41,6 +47,25 @@ impl GraphServer {
             id: obj.id,
             r#type: obj.type_name,
             metadata: Some(metadata),
+        }
+    }
+
+    async fn validate_object_metadata(
+        &self,
+        type_name: &str,
+        metadata: &JsonValue,
+    ) -> Result<(), Status> {
+        match self
+            .schema_repository
+            .validate_object(type_name, metadata)
+            .await
+        {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(Status::invalid_argument("Object does not match schema")),
+            Err(e) => {
+                tracing::error!("Failed to validate object: {:?}", e);
+                Err(Status::internal("Failed to validate object"))
+            }
         }
     }
 }
@@ -143,11 +168,25 @@ impl GraphService for GraphServer {
     ) -> Result<Response<CreateObjectResponse>, Status> {
         // Extract user ID from JWT
         let user_id = request.user_id()?;
-
         let req = request.into_inner();
 
+        // Convert metadata to JSON for validation
+        let metadata = match &req.metadata {
+            Some(metadata) => {
+                let mut map = serde_json::Map::new();
+                for (k, v) in &metadata.fields {
+                    map.insert(k.clone(), super::prost_value_to_json_value(v.clone()));
+                }
+                JsonValue::Object(map)
+            }
+            None => JsonValue::Object(serde_json::Map::new()),
+        };
+
+        // Validate against schema if one exists
+        self.validate_object_metadata(&req.r#type, &metadata)
+            .await?;
+
         // Use the user_id when creating the object
-        // This would be stored in your database along with the object
         let (object, revision) = self
             .repository
             .create_object(user_id, req)
@@ -156,7 +195,7 @@ impl GraphService for GraphServer {
 
         Ok(Response::new(CreateObjectResponse {
             object: Some(object.to_pb()),
-            revision: revision.to_zookie().ok(), // Fill this in based on your revision tracking
+            revision: revision.to_zookie().ok(),
         }))
     }
 

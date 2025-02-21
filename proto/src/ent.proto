@@ -128,8 +128,9 @@ service SchemaService {
 }
 
 message CreateSchemaRequest {
-  string schema = 1;                          // JSON Schema definition
-  string description = 2;                     // Optional schema description
+  string type_name = 1;                       // Type name for the schema
+  string schema = 2;                          // JSON Schema definition
+  string description = 3;                     // Optional schema description
 }
 
 message CreateSchemaResponse {

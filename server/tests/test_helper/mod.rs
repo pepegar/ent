@@ -111,7 +111,8 @@ impl EntTestBuilder {
 
         if let Some(schema) = self.schema {
             let request = CreateSchemaRequest {
-                schema,
+                schema: schema.to_string(),
+                type_name: "test_type".to_string(),
                 description: "Test schema".to_string(),
             };
             info!(schema = &request.schema);
