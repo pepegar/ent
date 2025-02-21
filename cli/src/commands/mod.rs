@@ -16,7 +16,7 @@ pub struct Cli {
     pub command: Commands,
 
     /// The endpoint to connect to
-    #[arg(long, default_value = "http://127.0.0.1:50051")]
+    #[arg(long, default_value = "http2://127.0.0.1:50051")]
     pub endpoint: String,
 }
 

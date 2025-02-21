@@ -24,6 +24,7 @@ uuid.workspace = true
 tonic-reflection.workspace = true
 tonic-health.workspace = true
 jsonschema = { version = "0.29.0", features = ["reqwest", "resolve-http", "resolve-file"] }
+regex = "1.10.3"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

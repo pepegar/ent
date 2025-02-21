@@ -22,6 +22,10 @@ pub struct CreateSchemaCommand {
     #[arg(long, short)]
     pub file: PathBuf,
 
+    /// Type name for the schema
+    #[arg(long)]
+    pub type_name: String,
+
     /// Optional description of the schema
     #[arg(long, short)]
     pub description: Option<String>,
@@ -42,7 +46,7 @@ async fn create_schema(
     let request = tonic::Request::new(CreateSchemaRequest {
         schema: schema,
         description: cmd.description.unwrap_or_default(),
-        type_name: "admin_type".to_string(),
+        type_name: cmd.type_name,
     });
 
     let response = client.create_schema(request).await?;
