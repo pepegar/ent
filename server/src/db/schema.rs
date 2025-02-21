@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use jsonschema::Validator;
+use serde_json::Value;
 use sqlx::PgPool;
 use time::OffsetDateTime;
 use tracing::instrument;
@@ -8,7 +9,7 @@ use tracing::instrument;
 pub struct Schema {
     pub id: i64,
     pub type_name: String,
-    pub schema: serde_json::Value,
+    pub schema: Value,
     pub created_at: Option<OffsetDateTime>,
     pub updated_at: Option<OffsetDateTime>,
 }
@@ -119,6 +120,7 @@ impl SchemaRepository {
 mod tests {
     use super::*;
     use sqlx::postgres::PgPoolOptions;
+    use uuid::Uuid;
 
     async fn setup() -> PgPool {
         let database_url = std::env::var("DATABASE_URL")
@@ -144,10 +146,12 @@ mod tests {
             }
         }"#;
 
+        let type_name = format!("test_type_{}", Uuid::new_v4());
+
         // Test creating schema
-        let created = repo.create_schema("test_type", test_schema).await.unwrap();
+        let created = repo.create_schema(&type_name, test_schema).await.unwrap();
         assert!(created.id > 0);
-        assert_eq!(created.type_name, "test_type");
+        assert_eq!(created.type_name, type_name);
 
         // Test retrieving schema by ID
         let retrieved = repo.get_schema(created.id).await.unwrap().unwrap();
@@ -155,7 +159,7 @@ mod tests {
         assert_eq!(created.schema, retrieved.schema);
 
         // Test retrieving schema by type
-        let retrieved = repo.get_schema_by_type("test_type").await.unwrap().unwrap();
+        let retrieved = repo.get_schema_by_type(&type_name).await.unwrap().unwrap();
         assert_eq!(created.id, retrieved.id);
         assert_eq!(created.schema, retrieved.schema);
     }
@@ -174,15 +178,20 @@ mod tests {
             "required": ["name", "age"]
         }"#;
 
+        let type_name = format!("person_{}", Uuid::new_v4());
+
         // Create schema
-        repo.create_schema("person", test_schema).await.unwrap();
+        repo.create_schema(&type_name, test_schema).await.unwrap();
 
         // Test valid object
         let valid_object = serde_json::json!({
             "name": "John",
             "age": 30
         });
-        assert!(repo.validate_object("person", &valid_object).await.unwrap());
+        assert!(repo
+            .validate_object(&type_name, &valid_object)
+            .await
+            .unwrap());
 
         // Test invalid object
         let invalid_object = serde_json::json!({
@@ -190,7 +199,7 @@ mod tests {
             "age": "30" // age should be a number
         });
         assert!(!repo
-            .validate_object("person", &invalid_object)
+            .validate_object(&type_name, &invalid_object)
             .await
             .unwrap());
     }

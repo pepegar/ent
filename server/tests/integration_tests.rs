@@ -7,6 +7,7 @@ use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use std::net::SocketAddr;
 use test_helper::EntTestBuilder;
+use testcontainers::{clients::Cli, Container, GenericImage};
 use tokio::net::TcpListener;
 use tonic::transport::Server;
 use uuid::Uuid;
@@ -22,35 +23,99 @@ mod common {
     };
     use ent_server::{GraphServer, SchemaServer};
     use once_cell::sync::Lazy;
-    use sqlx::{Pool, Postgres};
+    use sqlx::{Pool, Postgres as SqlxPostgres};
     use std::sync::Mutex;
     use tracing::info;
     use tracing_subscriber::fmt::format::FmtSpan;
 
     // Ensure migrations are run only once
     static MIGRATIONS_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+    // Create a single Docker client for all tests
+    static DOCKER: Lazy<Cli> = Lazy::new(Cli::default);
 
-    pub async fn setup_test_db() -> Result<Pool<Postgres>> {
+    // Wrapper struct to ensure container cleanup
+    pub struct PostgresContainer<'a> {
+        container: Container<'a, GenericImage>,
+        port: u16,
+    }
+
+    impl<'a> PostgresContainer<'a> {
+        pub fn new() -> Self {
+            let postgres_image = GenericImage::new("postgres", "15-alpine")
+                .with_env_var("POSTGRES_USER", "postgres")
+                .with_env_var("POSTGRES_PASSWORD", "postgres")
+                .with_env_var("POSTGRES_DB", "postgres")
+                .with_wait_for(testcontainers::core::WaitFor::message_on_stderr(
+                    "database system is ready to accept connections",
+                ));
+
+            let container = DOCKER.run(postgres_image);
+            let port = container.get_host_port_ipv4(5432);
+
+            Self { container, port }
+        }
+
+        pub fn port(&self) -> u16 {
+            self.port
+        }
+    }
+
+    impl<'a> Drop for PostgresContainer<'a> {
+        fn drop(&mut self) {
+            info!("Cleaning up Postgres container {}", self.container.id());
+            // The container will be automatically removed when dropped
+        }
+    }
+
+    pub async fn setup_test_db() -> Result<(Pool<SqlxPostgres>, PostgresContainer<'static>)> {
         let _lock = MIGRATIONS_LOCK.lock().unwrap();
+
+        // Start a Postgres container
+        let container = PostgresContainer::new();
+        let connection_string = format!(
+            "postgres://postgres:postgres@localhost:{}/postgres",
+            container.port()
+        );
+
+        // Create the test database
+        let admin_pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(&connection_string)
+            .await?;
+
+        // Create the ent user and grant privileges
+        sqlx::query(
+            r#"
+            DO $$
+            BEGIN
+                IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'ent') THEN
+                    CREATE USER ent WITH PASSWORD 'ent_password' SUPERUSER CREATEDB;
+                END IF;
+            END
+            $$;
+            "#,
+        )
+        .execute(&admin_pool)
+        .await?;
 
         // Create a unique test database name
         let test_db_name = format!("ent_test_{}", Uuid::new_v4().simple());
-        let admin_db_url = "postgres://ent:ent_password@localhost:5432/postgres";
-
-        // Connect to the default postgres database to create our test database
-        let admin_pool = PgPoolOptions::new()
-            .max_connections(1)
-            .connect(admin_db_url)
-            .await?;
-
-        // Create the test database
         sqlx::query(&format!("CREATE DATABASE {}", test_db_name))
             .execute(&admin_pool)
             .await?;
 
-        // Connect to the new test database
+        // Grant privileges to ent user
+        sqlx::query(&format!(
+            "GRANT ALL PRIVILEGES ON DATABASE {} TO ent",
+            test_db_name
+        ))
+        .execute(&admin_pool)
+        .await?;
+
+        // Connect to the new test database as ent user
         let test_db_url = format!(
-            "postgres://ent:ent_password@localhost:5432/{}",
+            "postgres://ent:ent_password@localhost:{}/{}",
+            container.port(),
             test_db_name
         );
         let pool = PgPoolOptions::new()
@@ -61,7 +126,7 @@ mod common {
         // Run migrations
         sqlx::migrate!("../migrations").run(&pool).await?;
 
-        Ok(pool)
+        Ok((pool, container))
     }
 
     pub async fn get_test_server_address() -> Result<SocketAddr> {
@@ -73,13 +138,13 @@ mod common {
         Ok(addr)
     }
 
-    pub async fn spawn_app() -> Result<(String, Pool<Postgres>)> {
+    pub async fn spawn_app() -> Result<(String, Pool<SqlxPostgres>, PostgresContainer<'static>)> {
         let _subscriber = tracing_subscriber::fmt()
             .with_span_events(FmtSpan::FULL)
             .with_test_writer()
             .try_init();
 
-        let pool = setup_test_db().await?;
+        let (pool, container) = setup_test_db().await?;
         let addr = get_test_server_address().await?;
 
         // Create test settings
@@ -112,17 +177,19 @@ mod common {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         info!("Test server ready");
 
-        Ok((format!("http://{}", addr), pool))
+        Ok((format!("http://{}", addr), pool, container))
     }
 }
 
 #[tokio::test]
 async fn test_create_schema() -> Result<()> {
     // Spawn a new instance of the application
-    let (address, _pool) = common::spawn_app().await?;
+    let (address, _pool, _container) = common::spawn_app().await?;
 
     // Create a gRPC client
     let mut client = SchemaServiceClient::connect(address).await?;
+
+    let type_name = format!("test_type_{}", Uuid::new_v4());
 
     // Create a test schema
     let request = tonic::Request::new(CreateSchemaRequest {
@@ -135,7 +202,7 @@ async fn test_create_schema() -> Result<()> {
         }"#
         .to_string(),
         description: "Test schema".to_string(),
-        type_name: "test_type".to_string(),
+        type_name: type_name,
     });
 
     let response = client.create_schema(request).await;
@@ -148,14 +215,16 @@ async fn test_create_schema() -> Result<()> {
 
 #[tokio::test]
 async fn test_invalid_schema() -> Result<()> {
-    let (address, _pool) = common::spawn_app().await?;
+    let (address, _pool, _container) = common::spawn_app().await?;
     let mut client = SchemaServiceClient::connect(address).await?;
+
+    let type_name = format!("test_type_{}", Uuid::new_v4());
 
     // Try to create an invalid schema
     let request = tonic::Request::new(CreateSchemaRequest {
         schema: r#"{ invalid json }"#.to_string(),
         description: "Invalid schema".to_string(),
-        type_name: "test_type".to_string(),
+        type_name: type_name,
     });
 
     // Should return an error
@@ -167,7 +236,9 @@ async fn test_invalid_schema() -> Result<()> {
 
 #[tokio::test]
 async fn test_complex_scenario() -> Result<()> {
-    let (address, _pool) = common::spawn_app().await?;
+    let (address, _pool, _container) = common::spawn_app().await?;
+
+    let type_name = format!("test_type_{}", Uuid::new_v4());
 
     let state = EntTestBuilder::new()
         .with_schema(
@@ -182,14 +253,14 @@ async fn test_complex_scenario() -> Result<()> {
         .with_user("user2")
         .with_object(
             0,
-            "document",
+            &type_name,
             json!({
                 "name": "Doc 1"
             }),
         )
         .with_object(
             1,
-            "document",
+            &type_name,
             json!({
                 "name": "Doc 2"
             }),
@@ -214,7 +285,7 @@ async fn test_complex_scenario() -> Result<()> {
 
 #[tokio::test]
 async fn test_schema_validation_comprehensive() -> Result<()> {
-    let (address, _pool) = common::spawn_app().await?;
+    let (address, _pool, _container) = common::spawn_app().await?;
 
     // Create schema client
     let mut schema_client = SchemaServiceClient::connect(address.clone()).await?;
@@ -513,7 +584,7 @@ async fn test_schema_validation_comprehensive() -> Result<()> {
 
 #[tokio::test]
 async fn test_schema_validation_additional_cases() -> Result<()> {
-    let (address, _pool) = common::spawn_app().await?;
+    let (address, _pool, _container) = common::spawn_app().await?;
 
     let mut schema_client = SchemaServiceClient::connect(address.clone()).await?;
     let mut graph_client = GraphServiceClient::connect(address).await?;

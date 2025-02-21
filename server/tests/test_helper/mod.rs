@@ -7,6 +7,7 @@ use ent_server::server::json_value_to_prost_value;
 use prost_types::Struct;
 use serde_json::Value as JsonValue;
 use tracing::info;
+use uuid::Uuid;
 
 use crate::jwt::generate_test_token;
 
@@ -110,14 +111,20 @@ impl EntTestBuilder {
         let mut graph_client = GraphServiceClient::connect(addr).await?;
 
         if let Some(schema) = self.schema {
+            let type_name = format!("test_type_{}", Uuid::new_v4());
             let request = CreateSchemaRequest {
                 schema: schema.to_string(),
-                type_name: "test_type".to_string(),
+                type_name: type_name.clone(),
                 description: "Test schema".to_string(),
             };
             info!(schema = &request.schema);
             let response = schema_client.create_schema(request).await?;
             info!(response = ?response);
+
+            // Update all object requests to use the new type name
+            for (_, request) in self.objects_to_create.iter_mut() {
+                request.r#type = type_name.clone();
+            }
         }
 
         // Create objects

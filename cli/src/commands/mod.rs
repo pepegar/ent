@@ -32,7 +32,8 @@ pub enum Commands {
 }
 
 pub async fn execute(cli: Cli) -> Result<()> {
-    // TODO: Get from config
+    // TODO: Get from --endpoint flag
+    // TODO: have a context system, similar to kubectl
     let addr = "http://127.0.0.1:50051";
 
     match cli.command {
