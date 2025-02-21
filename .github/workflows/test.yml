@@ -42,10 +42,14 @@ jobs:
     - name: Install devenv.sh
       run: nix profile install nixpkgs#devenv
 
-    - name: Start devenv shell
-      run: devenv shell
+    - name: Cache devenv
+      uses: actions/cache@v3
+      with:
+        path: |
+          .devenv
+        key: ${{ runner.os }}-devenv-${{ hashFiles('devenv.lock') }}
 
-    - name: Cache dependencies
+    - name: Cache cargo
       uses: actions/cache@v3
       with:
         path: |
@@ -54,8 +58,16 @@ jobs:
           target
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+    - name: Start devenv shell and run migrations
+      run: |
+        devenv shell sqlx migrate run
+      env:
+        ENT_DATABASE_URL: postgres://ent:ent_password@localhost:5432/ent
+
     - name: Run cargo test
       run: devenv shell cargo test
+      env:
+        ENT_DATABASE_URL: postgres://ent:ent_password@localhost:5432/ent
 
     - name: Run integration tests
       run: |
