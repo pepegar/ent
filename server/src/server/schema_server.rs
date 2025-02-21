@@ -3,7 +3,6 @@ use ent_proto::ent::schema_service_server::SchemaService;
 use ent_proto::ent::{CreateSchemaRequest, CreateSchemaResponse};
 use sqlx::PgPool;
 use tonic::{async_trait, Request, Response, Status};
-use tracing::info;
 
 #[derive(Debug)]
 pub struct SchemaServer {
