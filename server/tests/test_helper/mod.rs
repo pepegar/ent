@@ -13,6 +13,7 @@ use crate::jwt::generate_test_token;
 // Represents a user context for testing
 #[derive(Debug, Clone)]
 pub struct TestUser {
+    #[allow(dead_code)]
     id: String,
     token: String,
 }
@@ -20,6 +21,7 @@ pub struct TestUser {
 // Stores created objects for reference
 #[derive(Debug)]
 pub struct CreatedObject {
+    #[allow(dead_code)]
     user_index: usize,
     object: Object,
 }
@@ -177,6 +179,7 @@ impl EntTestBuilder {
 pub struct EntTestState {
     pub users: Vec<TestUser>,
     pub objects: Vec<CreatedObject>,
+    #[allow(dead_code)]
     pub edges: Vec<Edge>,
 }
 
