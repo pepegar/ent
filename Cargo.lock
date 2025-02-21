@@ -628,6 +628,7 @@ dependencies = [
  "clap",
  "ent-proto",
  "ent-server",
+ "prost-types",
  "serde_json",
  "tokio",
  "tonic",

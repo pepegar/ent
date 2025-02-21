@@ -35,9 +35,31 @@ wait_for_server() {
     echo "Server is ready!"
 }
 
+# Function to generate a JWT token
+generate_jwt() {
+    local user_id="test-user-123"
+    local exp=$(($(date +%s) + 3600))  # 1 hour from now
+    local header='{"alg":"RS256","typ":"JWT"}'
+    local claims="{\"sub\":\"$user_id\",\"exp\":$exp,\"iss\":\"ent\"}"
+    
+    # Base64url encode header and claims
+    local b64_header=$(echo -n "$header" | base64 | tr '+/' '-_' | tr -d '=')
+    local b64_claims=$(echo -n "$claims" | base64 | tr '+/' '-_' | tr -d '=')
+    
+    # Create signature input
+    local sig_input="$b64_header.$b64_claims"
+    
+    # Sign with private key
+    local signature=$(echo -n "$sig_input" | openssl dgst -sha256 -sign test/data/private.pem | base64 | tr '+/' '-_' | tr -d '=')
+    
+    # Combine all parts
+    echo "$sig_input.$signature"
+}
+
 # Function to run the CLI
 run_cli() {
-    RUST_LOG=debug cargo run --bin ent -- --endpoint "$ENDPOINT" "$@"
+    local token=$(generate_jwt)
+    RUST_LOG=debug cargo run --bin ent -- --endpoint "$ENDPOINT" --auth "Bearer $token" "$@"
 }
 
 # Check if required tools are installed
@@ -78,10 +100,10 @@ export ENT_JWT_PUBLIC_KEY_PATH="./test/data/public.pem"
 export ENT_JWT_ISSUER="ent"
 export RUST_LOG=debug
 
-# Create test JWT public key if it doesn't exist
+# Create test JWT keys if they don't exist
 mkdir -p test/data
-if [ ! -f test/data/public.pem ]; then
-    echo "Creating test JWT public key..."
+if [ ! -f test/data/private.pem ] || [ ! -f test/data/public.pem ]; then
+    echo "Generating test JWT keys..."
     openssl genpkey -algorithm RSA -out test/data/private.pem
     openssl rsa -pubout -in test/data/private.pem -out test/data/public.pem
 fi
@@ -260,26 +282,62 @@ rm -f /tmp/valid-schema.json /tmp/invalid-schema.json \
 echo -e "\nTesting Graph Service..."
 echo "------------------------"
 
-# Get an object
-echo "3. Getting an object..."
-run_cli get-object 1
+# Create test objects
+echo "1. Creating test objects..."
+echo '{
+  "type": "post",
+  "metadata": {
+    "title": "Test Post",
+    "content": "This is a test post"
+  }
+}' > /tmp/post-object.json
+run_test_case "Create Post Object" "success" \
+    create-object --file /tmp/post-object.json --type post
 
-# Get a single edge
-echo -e "\n4. Getting a single edge..."
-run_cli get-edge 1 --edge-type author
+echo '{
+  "type": "user",
+  "metadata": {
+    "name": "Test User",
+    "email": "test@example.com"
+  }
+}' > /tmp/user-object.json
+run_test_case "Create User Object" "success" \
+    create-object --file /tmp/user-object.json --type user
 
-# Get multiple edges
-echo -e "\n5. Getting multiple edges..."
-run_cli get-edges 1 --edge-type comments
+# Test object retrieval
+echo "2. Testing object retrieval..."
+run_test_case "Get Post Object" "success" \
+    get-object --object-id 1 --consistency full
 
-# Error cases
+run_test_case "Get User Object" "success" \
+    get-object --object-id 2 --consistency minimum
 
-# Get non-existent object
-echo -e "\n6. Getting non-existent object (should fail)..."
-run_cli get-object 999999
+# Create edges between objects
+echo "3. Creating edges between objects..."
+run_test_case "Create Author Edge" "success" \
+    create-edge \
+    --from-id 1 --from-type post \
+    --to-id 2 --to-type user \
+    --relation author
 
-# Get edge with invalid object ID
-echo -e "\n7. Getting edge with invalid object ID (should fail)..."
-run_cli get-edge --edge-type author -- -1
+run_test_case "Create Comment Edge" "success" \
+    create-edge \
+    --from-id 1 --from-type post \
+    --to-id 2 --to-type user \
+    --relation comment
+
+# Test edge retrieval
+echo "4. Testing edge retrieval..."
+run_test_case "Get Author Edge" "success" \
+    get-edge --object-id 1 --edge-type author
+
+run_test_case "Get Comment Edge" "success" \
+    get-edge --object-id 1 --edge-type comment
+
+run_test_case "Get All Edges" "success" \
+    get-edges --object-id 1 --edge-type comment
+
+# Cleanup test files
+rm -f /tmp/post-object.json /tmp/user-object.json
 
 # The server will be killed by the trap on exit

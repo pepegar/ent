@@ -1,12 +1,8 @@
-use anyhow::Result;
 use clap::{Parser, Subcommand};
-use ent_proto::ent::{
-    graph_service_client::GraphServiceClient, schema_service_client::SchemaServiceClient,
-};
 
-mod admin;
-mod edge;
-mod object;
+pub mod admin;
+pub mod edge;
+pub mod object;
 
 #[derive(Parser)]
 #[command(name = "ent")]
@@ -18,6 +14,10 @@ pub struct Cli {
     /// The endpoint to connect to
     #[arg(long, default_value = "http2://127.0.0.1:50051")]
     pub endpoint: String,
+
+    /// The authentication token
+    #[arg(long)]
+    pub auth: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -33,30 +33,10 @@ pub enum Commands {
 
     /// Get multiple edges from an object
     GetEdges(edge::GetEdgesCommand),
-}
 
-pub async fn execute(cli: Cli) -> Result<()> {
-    let addr = cli.endpoint;
+    /// Create a new object
+    CreateObject(object::CreateObjectCommand),
 
-    match cli.command {
-        Commands::Admin(cmd) => {
-            let mut client = SchemaServiceClient::connect(addr.clone()).await?;
-            admin::execute(cmd, &mut client).await
-        }
-
-        Commands::GetObject(cmd) => {
-            let mut client = GraphServiceClient::connect(addr.clone()).await?;
-            object::execute(cmd, &mut client).await
-        }
-
-        Commands::GetEdge(cmd) => {
-            let mut client = GraphServiceClient::connect(addr.clone()).await?;
-            edge::execute_get_edge(cmd, &mut client).await
-        }
-
-        Commands::GetEdges(cmd) => {
-            let mut client = GraphServiceClient::connect(addr).await?;
-            edge::execute_get_edges(cmd, &mut client).await
-        }
-    }
+    /// Create a new edge
+    CreateEdge(edge::CreateEdgeCommand),
 }

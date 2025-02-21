@@ -63,7 +63,7 @@ impl Edge {
             to_type: self.to_type.clone(),
             metadata: match json_value_to_prost_value(json_value).kind {
                 Some(prost_types::value::Kind::StructValue(v)) => Some(v),
-                _ => todo!(),
+                _ => None,
             },
         }
     }
