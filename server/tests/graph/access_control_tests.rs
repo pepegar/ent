@@ -1,3 +1,4 @@
+use crate::test_helper::*;
 use anyhow::Result;
 use ent_proto::ent::{
     graph_service_client::GraphServiceClient, ConsistencyRequirement, GetObjectRequest,
@@ -5,7 +6,7 @@ use ent_proto::ent::{
 };
 use ent_server::auth::RequestExt;
 use serde_json::json;
-use tonic::Status;
+use std::collections::HashMap;
 
 use crate::{
     common::spawn_app,

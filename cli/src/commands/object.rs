@@ -38,7 +38,7 @@ pub async fn execute(
     client: &mut GraphServiceClient<Channel>,
     auth: Option<String>,
 ) -> Result<()> {
-    let consistency = parse_consistency(cmd.consistency)?;
+    let _consistency = parse_consistency(cmd.consistency)?;
 
     let request = tonic::Request::new(GetObjectRequest {
         object_id: cmd.object_id,

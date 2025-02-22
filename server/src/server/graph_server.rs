@@ -1,5 +1,5 @@
 use crate::auth::AuthenticatedRequest;
-use crate::db::graph::{GraphRepository, Object, ObjectWithMetadata};
+use crate::db::graph::{GraphRepository, ObjectWithMetadata};
 use crate::db::schema::SchemaRepository;
 use crate::db::transaction::{ConsistencyMode, Revision};
 use ent_proto::ent::consistency_requirement::Requirement;

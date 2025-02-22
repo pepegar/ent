@@ -74,7 +74,7 @@ pub async fn execute_get_edge(
     client: &mut GraphServiceClient<Channel>,
     auth: Option<String>,
 ) -> Result<()> {
-    let consistency = parse_consistency(cmd.consistency)?;
+    let _consistency = parse_consistency(cmd.consistency)?;
 
     let request = tonic::Request::new(GetEdgeRequest {
         object_id: cmd.object_id,
@@ -99,7 +99,7 @@ pub async fn execute_get_edges(
     client: &mut GraphServiceClient<Channel>,
     auth: Option<String>,
 ) -> Result<()> {
-    let consistency = parse_consistency(cmd.consistency)?;
+    let _consistency = parse_consistency(cmd.consistency)?;
 
     let request = tonic::Request::new(GetEdgesRequest {
         object_id: cmd.object_id,

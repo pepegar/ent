@@ -22,7 +22,7 @@ async fn test_concurrent_transaction_visibility() -> Result<()> {
 
     let object = state.get_object(0).unwrap();
     let object_id = object.id;
-    let initial_revision = state.objects[0].revision.clone();
+    let _initial_revision = state.objects[0].revision.clone();
 
     let mut client = GraphServiceClient::connect(address).await?;
 
@@ -92,7 +92,7 @@ async fn test_snapshot_isolation_phantom_prevention() -> Result<()> {
 
     let object = state.get_object(0).unwrap();
     let object_id = object.id;
-    let initial_revision = state.objects[0].revision.clone();
+    let _initial_revision = state.objects[0].revision.clone();
 
     let mut client = GraphServiceClient::connect(address).await?;
 
@@ -121,7 +121,7 @@ async fn test_snapshot_isolation_phantom_prevention() -> Result<()> {
     let get_initial_req = Request::new(GetObjectRequest {
         object_id,
         consistency: Some(ConsistencyRequirement {
-            requirement: Some(Requirement::ExactlyAt(initial_revision)),
+            requirement: Some(Requirement::ExactlyAt(_initial_revision)),
         }),
     })
     .with_bearer_token(user_token)?;
