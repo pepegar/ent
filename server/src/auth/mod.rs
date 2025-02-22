@@ -13,6 +13,20 @@ pub struct Claims {
     pub iss: String,
 }
 
+// Extension trait for adding bearer token to requests
+pub trait RequestExt<T> {
+    fn with_bearer_token(self, token: &str) -> Result<Request<T>>;
+}
+
+impl<T> RequestExt<T> for Request<T> {
+    fn with_bearer_token(mut self, token: &str) -> Result<Request<T>> {
+        let auth_header = format!("Bearer {}", token);
+        let auth_value = auth_header.parse()?;
+        self.metadata_mut().insert("authorization", auth_value);
+        Ok(self)
+    }
+}
+
 #[derive(Clone)]
 pub struct JwtValidator {
     decoding_key: DecodingKey,

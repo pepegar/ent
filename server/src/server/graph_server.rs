@@ -92,6 +92,23 @@ impl GraphServer {
             _ => Ok(ConsistencyMode::MinimizeLatency), // Default to minimize latency
         }
     }
+
+    async fn check_object_ownership(&self, object_id: i64, user_id: &str) -> Result<(), Status> {
+        match self
+            .repository
+            .check_object_ownership(object_id, user_id)
+            .await
+        {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(Status::permission_denied(
+                "You do not have permission to access this object",
+            )),
+            Err(e) => {
+                tracing::error!("Failed to check object ownership: {:?}", e);
+                Err(Status::internal("Failed to check object ownership"))
+            }
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -101,8 +118,12 @@ impl GraphService for GraphServer {
         &self,
         request: Request<GetObjectRequest>,
     ) -> Result<Response<GetObjectResponse>, Status> {
+        let user_id = request.user_id()?;
         let req = request.into_inner();
         let consistency = Self::parse_consistency_requirement(req.consistency)?;
+
+        // Check object ownership
+        self.check_object_ownership(req.object_id, &user_id).await?;
 
         match self.repository.get_object(req.object_id, consistency).await {
             Ok(Some(obj)) => Ok(Response::new(GetObjectResponse {
@@ -259,6 +280,9 @@ impl GraphService for GraphServer {
         // Extract user ID from JWT
         let user_id = request.user_id()?;
         let req = request.into_inner();
+
+        // Check object ownership
+        self.check_object_ownership(req.object_id, &user_id).await?;
 
         // Convert metadata to JSON for validation
         let metadata = match &req.metadata {

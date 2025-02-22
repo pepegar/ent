@@ -3,13 +3,14 @@ use clap::Args;
 use ent_proto::ent::{
     graph_service_client::GraphServiceClient, CreateEdgeRequest, GetEdgeRequest, GetEdgesRequest,
 };
+use ent_server::auth::RequestExt;
 use prost_types::Struct;
 use serde_json::Value as JsonValue;
 use std::fs;
 use std::path::PathBuf;
 use tonic::transport::Channel;
 
-use super::object::parse_consistency;
+use super::object::{json_value_to_prost_value, parse_consistency};
 
 #[derive(Args)]
 pub struct GetEdgeCommand {
@@ -75,17 +76,17 @@ pub async fn execute_get_edge(
 ) -> Result<()> {
     let consistency = parse_consistency(cmd.consistency)?;
 
-    let mut request = tonic::Request::new(GetEdgeRequest {
+    let request = tonic::Request::new(GetEdgeRequest {
         object_id: cmd.object_id,
         edge_type: cmd.edge_type,
         consistency: None,
     });
 
-    if let Some(token) = auth {
+    let request = if let Some(token) = auth {
+        request.with_bearer_token(&token)?
+    } else {
         request
-            .metadata_mut()
-            .insert("authorization", token.parse()?);
-    }
+    };
 
     let response = client.get_edge(request).await?;
     println!("{:#?}", response.get_ref());
@@ -100,17 +101,17 @@ pub async fn execute_get_edges(
 ) -> Result<()> {
     let consistency = parse_consistency(cmd.consistency)?;
 
-    let mut request = tonic::Request::new(GetEdgesRequest {
+    let request = tonic::Request::new(GetEdgesRequest {
         object_id: cmd.object_id,
         edge_type: cmd.edge_type,
         consistency: None,
     });
 
-    if let Some(token) = auth {
+    let request = if let Some(token) = auth {
+        request.with_bearer_token(&token)?
+    } else {
         request
-            .metadata_mut()
-            .insert("authorization", token.parse()?);
-    }
+    };
 
     let response = client.get_edges(request).await?;
     println!("{:#?}", response.get_ref());
@@ -131,7 +132,7 @@ pub async fn execute_create_edge(
             for (k, v) in map {
                 metadata_struct
                     .fields
-                    .insert(k, super::object::json_value_to_prost_value(v));
+                    .insert(k, json_value_to_prost_value(v));
             }
         }
         Some(metadata_struct)
@@ -139,7 +140,7 @@ pub async fn execute_create_edge(
         None
     };
 
-    let mut request = tonic::Request::new(CreateEdgeRequest {
+    let request = tonic::Request::new(CreateEdgeRequest {
         from_id: cmd.from_id,
         from_type: cmd.from_type,
         to_id: cmd.to_id,
@@ -148,11 +149,11 @@ pub async fn execute_create_edge(
         metadata,
     });
 
-    if let Some(token) = auth {
+    let request = if let Some(token) = auth {
+        request.with_bearer_token(&token)?
+    } else {
         request
-            .metadata_mut()
-            .insert("authorization", token.parse()?);
-    }
+    };
 
     let response = client.create_edge(request).await?;
     println!("{:#?}", response.get_ref());

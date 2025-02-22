@@ -6,9 +6,10 @@ use ent_proto::ent::{
     graph_service_client::GraphServiceClient, schema_service_client::SchemaServiceClient,
     CreateEdgeRequest, CreateObjectRequest, CreateSchemaRequest, Edge, Object,
 };
-use ent_server::server::json_value_to_prost_value;
+use ent_server::{auth::RequestExt, server::json_value_to_prost_value};
 use prost_types::Struct;
 use serde_json::Value as JsonValue;
+use tonic::Request;
 use tracing::info;
 use uuid::Uuid;
 
@@ -167,18 +168,11 @@ impl EntTestBuilder {
             }
         };
 
-        let mut request = tonic::Request::new(CreateObjectRequest {
+        let request = tonic::Request::new(CreateObjectRequest {
             r#type: type_name.to_string(),
             metadata: Some(metadata_struct),
-        });
-
-        let user = &self.users[object_index];
-        let auth_header = format!("Bearer {}", &user.token);
-        let auth_value: tonic::metadata::MetadataValue<tonic::metadata::Ascii> = auth_header
-            .parse()
-            .map_err(|e| anyhow::anyhow!("Failed to parse auth header: {}", e))?;
-
-        request.metadata_mut().insert("authorization", auth_value);
+        })
+        .with_bearer_token(&self.users[object_index].token)?;
 
         client
             .create_object(request)
@@ -218,10 +212,7 @@ impl EntTestBuilder {
         // Create objects
         for (user_index, request) in self.objects_to_create {
             let user = &self.users[user_index];
-            let mut request = tonic::Request::new(request);
-            request
-                .metadata_mut()
-                .insert("authorization", format!("Bearer {}", user.token).parse()?);
+            let request = tonic::Request::new(request).with_bearer_token(&user.token)?;
 
             info!(request = ?request);
 
@@ -252,10 +243,7 @@ impl EntTestBuilder {
             };
 
             let user = &self.users[edge_request.user_index];
-            let mut request = tonic::Request::new(request);
-            request
-                .metadata_mut()
-                .insert("authorization", format!("Bearer {}", user.token).parse()?);
+            let request = tonic::Request::new(request).with_bearer_token(&user.token)?;
 
             info!(request = ?request);
 

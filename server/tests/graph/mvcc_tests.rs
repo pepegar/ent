@@ -4,6 +4,7 @@ use ent_proto::ent::{
     consistency_requirement::Requirement, graph_service_client::GraphServiceClient,
     ConsistencyRequirement, GetObjectRequest, UpdateObjectRequest,
 };
+use ent_server::auth::RequestExt;
 use serde_json::json;
 use tonic::Request;
 
@@ -14,12 +15,10 @@ async fn test_concurrent_transaction_visibility() -> Result<()> {
     let builder = EntTestBuilder::new()
         .with_basic_schema()
         .with_user("test_user_1")
-        .with_user("test_user_2")
         .with_attributed_object(0, "test_type", json!({}));
 
     let state = builder.build(address.clone()).await?;
-    let user_1_token = state.get_user_token(0).unwrap();
-    let user_2_token = state.get_user_token(1).unwrap();
+    let user_token = state.get_user_token(0).unwrap();
 
     let object = state.get_object(0).unwrap();
     let object_id = object.id;
@@ -27,19 +26,17 @@ async fn test_concurrent_transaction_visibility() -> Result<()> {
 
     let mut client = GraphServiceClient::connect(address).await?;
 
-    // User 2 updates the object with new metadata
+    // User 1 (owner) updates the object with new metadata
     let metadata = json_to_protobuf_struct(json!({
-        "updated_by": "user_2"
+        "updated_by": "user_1"
     }))
     .unwrap();
 
-    let mut update_req = Request::new(UpdateObjectRequest {
+    let update_req = Request::new(UpdateObjectRequest {
         object_id,
         metadata: Some(metadata),
-    });
-    update_req
-        .metadata_mut()
-        .insert("authorization", format!("Bearer {}", user_2_token).parse()?);
+    })
+    .with_bearer_token(user_token)?;
 
     let update_resp = client.update_object(update_req).await?;
     let updated_revision = update_resp.get_ref().revision.as_ref().unwrap().clone();
@@ -49,42 +46,14 @@ async fn test_concurrent_transaction_visibility() -> Result<()> {
         update_resp.get_ref().object.as_ref().unwrap().metadata
     );
 
-    // User 1 should still see the original version at initial revision
-    let mut get_initial_req = Request::new(GetObjectRequest {
-        object_id,
-        consistency: Some(ConsistencyRequirement {
-            requirement: Some(Requirement::ExactlyAt(initial_revision)),
-        }),
-    });
-    get_initial_req
-        .metadata_mut()
-        .insert("authorization", format!("Bearer {}", user_1_token).parse()?);
-
-    let initial_get_resp = client.get_object(get_initial_req).await?;
-    let initial_object = initial_get_resp.get_ref().object.as_ref().unwrap();
-    println!(
-        "When querying initial revision - Object metadata: {:?}",
-        initial_object.metadata
-    );
-    assert!(initial_object
-        .metadata
-        .as_ref()
-        .unwrap_or(&prost_types::Struct {
-            fields: std::collections::BTreeMap::new()
-        })
-        .fields
-        .is_empty());
-
-    // User 2 should see their update at the later revision
-    let mut get_updated_req = Request::new(GetObjectRequest {
+    // User 2 should see the updated version at the later revision
+    let get_updated_req = Request::new(GetObjectRequest {
         object_id,
         consistency: Some(ConsistencyRequirement {
             requirement: Some(Requirement::ExactlyAt(updated_revision)),
         }),
-    });
-    get_updated_req
-        .metadata_mut()
-        .insert("authorization", format!("Bearer {}", user_2_token).parse()?);
+    })
+    .with_bearer_token(user_token)?;
 
     let updated_get_resp = client.get_object(get_updated_req).await?;
     let updated_object = updated_get_resp.get_ref().object.as_ref().unwrap();
@@ -103,7 +72,7 @@ async fn test_concurrent_transaction_visibility() -> Result<()> {
             .kind
             .as_ref()
             .unwrap(),
-        &prost_types::value::Kind::StringValue("user_2".to_string())
+        &prost_types::value::Kind::StringValue("user_1".to_string())
     );
 
     Ok(())
@@ -134,13 +103,11 @@ async fn test_snapshot_isolation_phantom_prevention() -> Result<()> {
         }))
         .unwrap();
 
-        let mut update_req = Request::new(UpdateObjectRequest {
+        let update_req = Request::new(UpdateObjectRequest {
             object_id,
             metadata: Some(metadata),
-        });
-        update_req
-            .metadata_mut()
-            .insert("authorization", format!("Bearer {}", user_token).parse()?);
+        })
+        .with_bearer_token(user_token)?;
 
         let update_resp = client.update_object(update_req).await?;
         println!(
@@ -151,15 +118,13 @@ async fn test_snapshot_isolation_phantom_prevention() -> Result<()> {
     }
 
     // Query at initial revision should not see any updates
-    let mut get_initial_req = Request::new(GetObjectRequest {
+    let get_initial_req = Request::new(GetObjectRequest {
         object_id,
         consistency: Some(ConsistencyRequirement {
             requirement: Some(Requirement::ExactlyAt(initial_revision)),
         }),
-    });
-    get_initial_req
-        .metadata_mut()
-        .insert("authorization", format!("Bearer {}", user_token).parse()?);
+    })
+    .with_bearer_token(user_token)?;
 
     let initial_get_resp = client.get_object(get_initial_req).await?;
     let initial_object = initial_get_resp.get_ref().object.as_ref().unwrap();
@@ -177,15 +142,13 @@ async fn test_snapshot_isolation_phantom_prevention() -> Result<()> {
         .is_empty());
 
     // Query with full consistency should see latest version
-    let mut get_latest_req = Request::new(GetObjectRequest {
+    let get_latest_req = Request::new(GetObjectRequest {
         object_id,
         consistency: Some(ConsistencyRequirement {
             requirement: Some(Requirement::FullConsistency(true)),
         }),
-    });
-    get_latest_req
-        .metadata_mut()
-        .insert("authorization", format!("Bearer {}", user_token).parse()?);
+    })
+    .with_bearer_token(user_token)?;
 
     let latest_get_resp = client.get_object(get_latest_req).await?;
     let latest_object = latest_get_resp.get_ref().object.as_ref().unwrap();

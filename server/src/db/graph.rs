@@ -723,6 +723,21 @@ impl GraphRepository {
             }
         }
     }
+
+    pub async fn check_object_ownership(&self, object_id: i64, user_id: &str) -> Result<bool> {
+        let result = sqlx::query!(
+            r#"
+            SELECT user_id
+            FROM objects
+            WHERE id = $1
+            "#,
+            object_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(result.user_id == user_id)
+    }
 }
 
 #[cfg(test)]

@@ -4,6 +4,7 @@ use ent_proto::ent::{
     consistency_requirement::Requirement, graph_service_client::GraphServiceClient,
     ConsistencyRequirement, CreateObjectRequest, GetObjectRequest,
 };
+use ent_server::auth::RequestExt;
 use prost_types::{Struct, Value as ProstValue};
 use serde_json::Value as JsonValue;
 use std::fs;
@@ -39,16 +40,16 @@ pub async fn execute(
 ) -> Result<()> {
     let consistency = parse_consistency(cmd.consistency)?;
 
-    let mut request = tonic::Request::new(GetObjectRequest {
+    let request = tonic::Request::new(GetObjectRequest {
         object_id: cmd.object_id,
         consistency: None,
     });
 
-    if let Some(token) = auth {
+    let request = if let Some(token) = auth {
+        request.with_bearer_token(&token)?
+    } else {
         request
-            .metadata_mut()
-            .insert("authorization", token.parse()?);
-    }
+    };
 
     let response = client.get_object(request).await?;
     println!("{:#?}", response.get_ref());
@@ -115,16 +116,16 @@ pub async fn execute_create_object(
         }
     }
 
-    let mut request = tonic::Request::new(CreateObjectRequest {
+    let request = tonic::Request::new(CreateObjectRequest {
         r#type: cmd.r#type,
         metadata: Some(metadata_struct),
     });
 
-    if let Some(token) = auth {
+    let request = if let Some(token) = auth {
+        request.with_bearer_token(&token)?
+    } else {
         request
-            .metadata_mut()
-            .insert("authorization", token.parse()?);
-    }
+    };
 
     let response = client.create_object(request).await?;
     println!("{:#?}", response.get_ref());
