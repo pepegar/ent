@@ -51,11 +51,25 @@ CREATE TABLE triples (
     relation TEXT NOT NULL,
     to_type TEXT NOT NULL,
     to_id BIGINT NOT NULL,
-    metadata JSONB NOT NULL DEFAULT '{}',
     created_xid xid8 NOT NULL DEFAULT pg_current_xact_id(),
     deleted_xid xid8 NOT NULL DEFAULT '9223372036854775807',
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create edge metadata history table
+CREATE TABLE edge_metadata_history (
+    id BIGSERIAL PRIMARY KEY,
+    edge_id BIGINT NOT NULL,
+    metadata JSONB NOT NULL,
+    created_xid xid8 NOT NULL,
+    deleted_xid xid8 NOT NULL DEFAULT '9223372036854775807',
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_edge_metadata_history_edge
+        FOREIGN KEY (edge_id)
+        REFERENCES triples(id)
+        ON DELETE CASCADE
 );
 
 -- Create indexes
@@ -74,6 +88,10 @@ CREATE INDEX IF NOT EXISTS idx_triples_user_id ON triples(user_id);
 CREATE INDEX IF NOT EXISTS idx_triples_relation ON triples(relation);
 CREATE INDEX IF NOT EXISTS idx_triples_created_xid ON triples(created_xid);
 CREATE INDEX IF NOT EXISTS idx_triples_deleted_xid ON triples(deleted_xid);
+
+CREATE INDEX IF NOT EXISTS idx_edge_metadata_history_edge_id ON edge_metadata_history(edge_id);
+CREATE INDEX IF NOT EXISTS idx_edge_metadata_history_created_xid ON edge_metadata_history(created_xid);
+CREATE INDEX IF NOT EXISTS idx_edge_metadata_history_deleted_xid ON edge_metadata_history(deleted_xid);
 
 CREATE INDEX IF NOT EXISTS idx_transaction_timestamp ON relation_tuple_transaction(timestamp);
 

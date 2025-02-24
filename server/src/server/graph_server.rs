@@ -1,5 +1,5 @@
 use crate::auth::AuthenticatedRequest;
-use crate::db::graph::{GraphRepository, ObjectWithMetadata};
+use crate::db::graph::{EdgeWithMetadata, GraphRepository, ObjectWithMetadata};
 use crate::db::schema::SchemaRepository;
 use crate::db::transaction::{ConsistencyMode, Revision};
 use ent_proto::ent::consistency_requirement::Requirement;
@@ -7,7 +7,8 @@ use ent_proto::ent::graph_service_server::GraphService;
 use ent_proto::ent::{
     CreateEdgeRequest, CreateEdgeResponse, CreateObjectRequest, CreateObjectResponse,
     GetEdgeRequest, GetEdgeResponse, GetEdgesRequest, GetEdgesResponse, GetObjectRequest,
-    GetObjectResponse, Object as ProtoObject, UpdateObjectRequest, UpdateObjectResponse,
+    GetObjectResponse, Object as ProtoObject, UpdateEdgeRequest, UpdateEdgeResponse,
+    UpdateObjectRequest, UpdateObjectResponse,
 };
 use prost_types::Struct;
 use prost_types::Value as ProstValue;
@@ -154,6 +155,7 @@ impl GraphService for GraphServer {
                 // Get the target object with the same consistency requirement
                 match self.repository.get_object(edge.to_id, consistency).await {
                     Ok(Some(obj)) => Ok(Response::new(GetEdgeResponse {
+                        edge: Some(edge.to_pb()),
                         object: Some(Self::to_proto_object(obj)),
                     })),
                     Ok(None) => Err(Status::not_found("Target object not found")),
@@ -323,6 +325,39 @@ impl GraphService for GraphServer {
 
         Ok(Response::new(UpdateObjectResponse {
             object: Some(Self::to_proto_object(object)),
+            revision: revision.to_zookie().ok(),
+        }))
+    }
+
+    async fn update_edge(
+        &self,
+        request: Request<UpdateEdgeRequest>,
+    ) -> Result<Response<UpdateEdgeResponse>, Status> {
+        // Extract user ID from JWT
+        let user_id = request.user_id()?;
+        let req = request.into_inner();
+
+        // Convert metadata to JSON for validation
+        let metadata = match &req.metadata {
+            Some(metadata) => {
+                let mut map = serde_json::Map::new();
+                for (k, v) in &metadata.fields {
+                    map.insert(k.clone(), super::prost_value_to_json_value(v.clone()));
+                }
+                JsonValue::Object(map)
+            }
+            None => JsonValue::Object(serde_json::Map::new()),
+        };
+
+        // Use the user_id when updating the edge
+        let (edge, revision) = self
+            .repository
+            .update_edge(user_id, req.edge_id, metadata)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(UpdateEdgeResponse {
+            edge: Some(edge.to_pb()),
             revision: revision.to_zookie().ok(),
         }))
     }

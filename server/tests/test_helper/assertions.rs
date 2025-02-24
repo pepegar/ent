@@ -15,8 +15,8 @@ impl EntTestState {
             let to_obj = self.get_object(to_index);
 
             matches!((from_obj, to_obj), (Some(from), Some(to)) if
-                edge.from_id == from.id &&
-                edge.to_id == to.id
+                edge.edge.from_id == from.id &&
+                edge.edge.to_id == to.id
             )
         });
 

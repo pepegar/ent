@@ -30,13 +30,14 @@ message ConsistencyRequirement {
 
 // Core object type used across services
 message Edge {
-  int64 id = 1;                        // Unique identifier for the edge
-  int64 from_id = 2;                   // Unique identifier for the origin object
-  string from_type = 3;                // Type of the origin object
-  int64 to_id = 4;                     // Unique identifier for the destination object
-  string to_type = 5;                  // Type of the destination object
-  string relation = 6;                 // relation name
-  google.protobuf.Struct metadata = 7; // Edge properties and data
+  int64 id = 1;                              // Unique identifier for the edge
+  int64 from_id = 2;                         // ID of the source object
+  string from_type = 3;                       // Type of the source object
+  int64 to_id = 4;                           // ID of the target object
+  string to_type = 5;                         // Type of the target object
+  string relation = 6;                        // Type of the relationship
+  google.protobuf.Struct metadata = 7;        // Additional metadata for the edge
+  string revision = 8;                        // Revision identifier for MVCC
 }
 
 // Core object type used across services
@@ -66,6 +67,9 @@ service GraphService {
 
   // Update an existing object
   rpc UpdateObject(UpdateObjectRequest) returns (UpdateObjectResponse);
+
+  // Update an existing edge
+  rpc UpdateEdge(UpdateEdgeRequest) returns (UpdateEdgeResponse);
 }
 
 message GetObjectRequest {
@@ -84,7 +88,8 @@ message GetEdgeRequest {
 }
 
 message GetEdgeResponse {
-  Object object = 1;                          // Target object
+  Edge edge = 1;                              // The edge relationship
+  Object object = 2;                          // Target object
 }
 
 message GetEdgesRequest {
@@ -128,6 +133,16 @@ message UpdateObjectRequest {
 
 message UpdateObjectResponse {
   Object object = 1;                   // Updated object
+  Zookie revision = 2;                 // Revision marker for this operation
+}
+
+message UpdateEdgeRequest {
+  int64 edge_id = 1;                   // ID of edge to update
+  google.protobuf.Struct metadata = 2; // Updated edge properties and data
+}
+
+message UpdateEdgeResponse {
+  Edge edge = 1;                       // Updated edge
   Zookie revision = 2;                 // Revision marker for this operation
 }
 

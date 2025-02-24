@@ -36,6 +36,15 @@ pub struct CreatedObject {
     pub revision: ent_proto::ent::Zookie,
 }
 
+// Stores created edges for reference
+#[derive(Debug, Clone)]
+pub struct CreatedEdge {
+    #[allow(dead_code)]
+    pub user_index: usize,
+    pub edge: Edge,
+    pub revision: ent_proto::ent::Zookie,
+}
+
 // Edge creation request with object indices
 #[derive(Debug, Default, Clone)]
 struct EdgeCreationRequest {
@@ -55,7 +64,7 @@ pub struct EntTestBuilder {
     objects_to_create: Vec<(usize, CreateObjectRequest)>,
     edges_to_create: Vec<EdgeCreationRequest>,
     created_objects: Vec<CreatedObject>,
-    created_edges: Vec<Edge>,
+    created_edges: Vec<CreatedEdge>,
 }
 
 pub fn json_to_protobuf_struct(value: JsonValue) -> Option<Struct> {
@@ -252,8 +261,13 @@ impl EntTestBuilder {
             let response = graph_client.create_edge(request).await?;
 
             info!(response = ?response);
-            if let Some(edge) = response.into_inner().edge {
-                self.created_edges.push(edge);
+            let response = response.into_inner();
+            if let (Some(edge), Some(revision)) = (response.edge, response.revision) {
+                self.created_edges.push(CreatedEdge {
+                    user_index: edge_request.user_index,
+                    edge,
+                    revision,
+                });
             }
         }
 
@@ -435,13 +449,16 @@ impl EntTestBuilder {
 pub struct EntTestState {
     pub users: Vec<TestUser>,
     pub objects: Vec<CreatedObject>,
-    #[allow(dead_code)]
-    pub edges: Vec<Edge>,
+    pub edges: Vec<CreatedEdge>,
 }
 
 impl EntTestState {
     pub fn get_object(&self, index: usize) -> Option<&Object> {
         self.objects.get(index).map(|co| &co.object)
+    }
+
+    pub fn get_edge(&self, index: usize) -> Option<&Edge> {
+        self.edges.get(index).map(|ce| &ce.edge)
     }
 
     pub fn get_user_token(&self, index: usize) -> Option<&str> {

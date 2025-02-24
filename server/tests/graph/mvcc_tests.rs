@@ -2,7 +2,8 @@ use crate::test_helper::{json_to_protobuf_struct, EntTestBuilder};
 use anyhow::Result;
 use ent_proto::ent::{
     consistency_requirement::Requirement, graph_service_client::GraphServiceClient,
-    ConsistencyRequirement, GetObjectRequest, UpdateObjectRequest,
+    ConsistencyRequirement, GetEdgeRequest, GetObjectRequest, UpdateEdgeRequest,
+    UpdateObjectRequest,
 };
 use ent_server::auth::RequestExt;
 use serde_json::json;
@@ -78,61 +79,63 @@ async fn test_concurrent_transaction_visibility() -> Result<()> {
     Ok(())
 }
 
-/// Test that snapshot isolation prevents phantom reads
+/// Test that snapshot isolation prevents phantom reads for edges
 #[tokio::test]
-async fn test_snapshot_isolation_phantom_prevention() -> Result<()> {
+async fn test_edge_snapshot_isolation() -> Result<()> {
     let (address, _pool, _container) = crate::common::spawn_app().await?;
     let builder = EntTestBuilder::new()
         .with_basic_schema()
         .with_user("test_user")
-        .with_attributed_object(0, "test_type", json!({}));
+        .with_attributed_object(0, "test_type", json!({}))
+        .with_attributed_object(0, "test_type", json!({}))
+        .with_edge(0, 0, 1, "test_relation", json!({}));
 
     let state = builder.build(address.clone()).await?;
     let user_token = state.get_user_token(0).unwrap();
-
-    let object = state.get_object(0).unwrap();
-    let object_id = object.id;
-    let _initial_revision = state.objects[0].revision.clone();
+    let edge = state.get_edge(0).unwrap();
+    let edge_id = edge.id;
+    let _initial_revision = state.edges[0].revision.clone();
 
     let mut client = GraphServiceClient::connect(address).await?;
 
-    // Make multiple updates in sequence
+    // Make multiple updates to edge metadata in sequence
     for i in 1..=3 {
         let metadata = json_to_protobuf_struct(json!({
             "version": i.to_string()
         }))
         .unwrap();
 
-        let update_req = Request::new(UpdateObjectRequest {
-            object_id,
+        let update_req = Request::new(UpdateEdgeRequest {
+            edge_id,
             metadata: Some(metadata),
         })
         .with_bearer_token(user_token)?;
 
-        let update_resp = client.update_object(update_req).await?;
+        let update_resp = client.update_edge(update_req).await?;
         println!(
-            "After update {} - Object metadata: {:?}",
+            "After update {} - Edge metadata: {:?}",
             i,
-            update_resp.get_ref().object.as_ref().unwrap().metadata
+            update_resp.get_ref().edge.as_ref().unwrap().metadata
         );
     }
 
     // Query at initial revision should not see any updates
-    let get_initial_req = Request::new(GetObjectRequest {
-        object_id,
+    let get_initial_req = Request::new(GetEdgeRequest {
+        object_id: edge.from_id,
+        edge_type: edge.relation.clone(),
         consistency: Some(ConsistencyRequirement {
             requirement: Some(Requirement::ExactlyAt(_initial_revision)),
         }),
     })
     .with_bearer_token(user_token)?;
 
-    let initial_get_resp = client.get_object(get_initial_req).await?;
-    let initial_object = initial_get_resp.get_ref().object.as_ref().unwrap();
+    let initial_get_resp = client.get_edge(get_initial_req).await?;
+    let initial_edge = initial_get_resp.get_ref().edge.as_ref().unwrap();
     println!(
-        "When querying initial revision - Object metadata: {:?}",
-        initial_object.metadata
+        "When querying initial revision - Edge metadata: {:?}",
+        initial_edge.metadata
     );
-    assert!(initial_object
+    assert!(initial_edge
         .metadata
         .as_ref()
         .unwrap_or(&prost_types::Struct {
@@ -142,22 +145,23 @@ async fn test_snapshot_isolation_phantom_prevention() -> Result<()> {
         .is_empty());
 
     // Query with full consistency should see latest version
-    let get_latest_req = Request::new(GetObjectRequest {
-        object_id,
+    let get_latest_req = Request::new(GetEdgeRequest {
+        object_id: edge.from_id,
+        edge_type: edge.relation.clone(),
         consistency: Some(ConsistencyRequirement {
             requirement: Some(Requirement::FullConsistency(true)),
         }),
     })
     .with_bearer_token(user_token)?;
 
-    let latest_get_resp = client.get_object(get_latest_req).await?;
-    let latest_object = latest_get_resp.get_ref().object.as_ref().unwrap();
+    let latest_get_resp = client.get_edge(get_latest_req).await?;
+    let latest_edge = latest_get_resp.get_ref().edge.as_ref().unwrap();
     println!(
-        "When querying with full consistency - Object metadata: {:?}",
-        latest_object.metadata
+        "When querying with full consistency - Edge metadata: {:?}",
+        latest_edge.metadata
     );
     assert_eq!(
-        latest_object
+        latest_edge
             .metadata
             .as_ref()
             .unwrap()

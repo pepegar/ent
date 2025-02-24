@@ -82,11 +82,29 @@ impl Object {
 
 #[derive(Debug, sqlx::FromRow)]
 struct MetadataRecord {
-    metadata: Value,
+    pub metadata: Value,
+}
+
+impl MetadataRecord {
+    pub fn into_value(self) -> Value {
+        self.metadata
+    }
 }
 
 #[derive(Debug, sqlx::FromRow)]
 pub struct Edge {
+    pub id: i64,
+    pub from_type: String,
+    pub from_id: i64,
+    pub relation: String,
+    pub to_type: String,
+    pub to_id: i64,
+    pub created_at: Option<OffsetDateTime>,
+    pub updated_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct EdgeWithMetadata {
     pub id: i64,
     pub from_type: String,
     pub from_id: i64,
@@ -98,7 +116,7 @@ pub struct Edge {
     pub updated_at: Option<OffsetDateTime>,
 }
 
-impl Edge {
+impl EdgeWithMetadata {
     pub fn to_pb(&self) -> ProtoEdge {
         let json_value = self.metadata.clone();
         ProtoEdge {
@@ -112,6 +130,7 @@ impl Edge {
                 Some(prost_types::value::Kind::StructValue(v)) => Some(v),
                 _ => None,
             },
+            revision: String::new(), // Empty revision since it's handled separately in responses
         }
     }
 }
@@ -213,12 +232,15 @@ impl GraphRepository {
         &self,
         user_id: String,
         request: CreateEdgeRequest,
-    ) -> Result<(Edge, Revision)> {
-        let metadata: ProstValue = match request.metadata {
-            Some(v) => ProstValue {
-                kind: Some(prost_types::value::Kind::StructValue(v)),
-            },
-            None => ProstValue::default(),
+    ) -> Result<(EdgeWithMetadata, Revision)> {
+        let metadata: Value = match request.metadata {
+            Some(v) => {
+                let prost_value = ProstValue {
+                    kind: Some(prost_types::value::Kind::StructValue(v)),
+                };
+                prost_value_to_json_value(prost_value)
+            }
+            None => Value::Object(serde_json::Map::new()),
         };
 
         let mut tx = self.pool.begin().await?;
@@ -226,13 +248,12 @@ impl GraphRepository {
 
         let revision = transaction.revision();
 
-        // Create the object with transaction tracking
-        let object = sqlx::query_as!(
+        // Create the edge with transaction tracking
+        let edge = sqlx::query_as!(
             Edge,
             r#"
                 INSERT INTO triples (
                     relation, 
-                    metadata, 
                     user_id,
                     from_id,
                     from_type,
@@ -241,7 +262,7 @@ impl GraphRepository {
                     created_xid,
                     deleted_xid
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 RETURNING 
                     id, 
                     from_type,
@@ -249,12 +270,10 @@ impl GraphRepository {
                     relation, 
                     to_type,
                     to_id,
-                    metadata as "metadata: Value",
                     created_at as "created_at?: OffsetDateTime",
                     updated_at as "updated_at?: OffsetDateTime"
             "#,
             request.relation,
-            prost_value_to_json_value(metadata),
             user_id,
             request.from_id,
             request.from_type,
@@ -265,14 +284,47 @@ impl GraphRepository {
         )
         .fetch_one(&mut *tx)
         .await
-        .map_err(|e| anyhow!("Failed to create object: {}", e))?;
+        .map_err(|e| anyhow!("Failed to create edge: {}", e))?;
 
-        info!("Created object: {:?}", object);
+        // Create initial metadata entry
+        sqlx::query!(
+            r#"
+                INSERT INTO edge_metadata_history (
+                    edge_id,
+                    metadata,
+                    created_xid,
+                    deleted_xid
+                )
+                VALUES ($1, $2, $3, $4)
+            "#,
+            edge.id,
+            metadata,
+            transaction.xid as _,
+            Xid8::max() as _,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to create edge metadata: {}", e))?;
+
+        info!("Created edge: {:?}", edge);
 
         // Commit the transaction
         tx.commit().await?;
 
-        Ok((object, revision))
+        Ok((
+            EdgeWithMetadata {
+                id: edge.id,
+                from_type: edge.from_type,
+                from_id: edge.from_id,
+                relation: edge.relation,
+                to_type: edge.to_type,
+                to_id: edge.to_id,
+                metadata,
+                created_at: edge.created_at,
+                updated_at: edge.updated_at,
+            },
+            revision,
+        ))
     }
 
     pub async fn update_object(
@@ -359,6 +411,97 @@ impl GraphRepository {
                 metadata,
                 created_at: object.created_at,
                 updated_at: object.updated_at,
+            },
+            revision,
+        ))
+    }
+
+    pub async fn update_edge(
+        &self,
+        user_id: String,
+        edge_id: i64,
+        metadata: Value,
+    ) -> Result<(EdgeWithMetadata, Revision)> {
+        let mut tx = self.pool.begin().await?;
+        let transaction = Transaction::create(&mut tx).await?;
+
+        let revision = transaction.revision();
+
+        // Mark the current metadata version as deleted
+        sqlx::query!(
+            r#"
+            UPDATE edge_metadata_history
+            SET deleted_xid = $1
+            WHERE edge_id = $2
+            AND deleted_xid = $3
+            "#,
+            transaction.xid as _,
+            edge_id,
+            Xid8::max() as _,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to update edge metadata: {}", e))?;
+
+        // Create new metadata version
+        sqlx::query!(
+            r#"
+            INSERT INTO edge_metadata_history (
+                edge_id,
+                metadata,
+                created_xid,
+                deleted_xid
+            )
+            VALUES ($1, $2, $3, $4)
+            "#,
+            edge_id,
+            metadata,
+            transaction.xid as _,
+            Xid8::max() as _,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to create edge metadata: {}", e))?;
+
+        // Update the edge's updated_at timestamp
+        let edge = sqlx::query_as!(
+            Edge,
+            r#"
+            UPDATE triples
+            SET updated_at = NOW(),
+                user_id = $1
+            WHERE id = $2
+            RETURNING 
+                id,
+                from_type,
+                from_id,
+                relation,
+                to_type,
+                to_id,
+                created_at as "created_at?: OffsetDateTime",
+                updated_at as "updated_at?: OffsetDateTime"
+            "#,
+            user_id,
+            edge_id,
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| anyhow!("Failed to update edge: {}", e))?;
+
+        // Commit the transaction
+        tx.commit().await?;
+
+        Ok((
+            EdgeWithMetadata {
+                id: edge.id,
+                from_type: edge.from_type,
+                from_id: edge.from_id,
+                relation: edge.relation,
+                to_type: edge.to_type,
+                to_id: edge.to_id,
+                metadata,
+                created_at: edge.created_at,
+                updated_at: edge.updated_at,
             },
             revision,
         ))
@@ -486,7 +629,7 @@ impl GraphRepository {
             Ok(Some(ObjectWithMetadata {
                 id: object.id,
                 type_name: object.type_name,
-                metadata: metadata.metadata,
+                metadata: metadata.into_value(),
                 created_at: object.created_at,
                 updated_at: object.updated_at,
             }))
@@ -495,31 +638,29 @@ impl GraphRepository {
         }
     }
 
-    #[instrument(skip(self))]
     pub async fn get_edge(
         &self,
         from_id: i64,
         relation: &str,
         consistency: ConsistencyMode,
-    ) -> Result<Option<Edge>> {
-        match &consistency {
+    ) -> Result<Option<EdgeWithMetadata>> {
+        let edge = match &consistency {
             ConsistencyMode::Full => sqlx::query_as!(
                 Edge,
                 r#"
                     SELECT 
-                        id,
-                        from_type,
-                        from_id,
-                        relation,
-                        to_type,
-                        to_id,
-                        metadata as "metadata: Value",
-                        created_at as "created_at?: OffsetDateTime",
-                        updated_at as "updated_at?: OffsetDateTime"
-                    FROM triples
-                    WHERE from_id = $1 AND relation = $2
-                    AND created_xid <= pg_current_xact_id()
-                    AND deleted_xid > pg_current_xact_id()
+                        t.id,
+                        t.from_type,
+                        t.from_id,
+                        t.relation,
+                        t.to_type,
+                        t.to_id,
+                        t.created_at as "created_at?: OffsetDateTime",
+                        t.updated_at as "updated_at?: OffsetDateTime"
+                    FROM triples t
+                    WHERE t.from_id = $1 AND t.relation = $2
+                    AND t.created_xid <= pg_current_xact_id()
+                    AND t.deleted_xid > pg_current_xact_id()
                     LIMIT 1
                     "#,
                 from_id,
@@ -527,22 +668,21 @@ impl GraphRepository {
             )
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| anyhow!("Failed to fetch edge: {}", e)),
+            .map_err(|e| anyhow!("Failed to fetch edge: {}", e))?,
             ConsistencyMode::MinimizeLatency => sqlx::query_as!(
                 Edge,
                 r#"
                     SELECT 
-                        id,
-                        from_type,
-                        from_id,
-                        relation,
-                        to_type,
-                        to_id,
-                        metadata as "metadata: Value",
-                        created_at as "created_at?: OffsetDateTime",
-                        updated_at as "updated_at?: OffsetDateTime"
-                    FROM triples
-                    WHERE from_id = $1 AND relation = $2
+                        t.id,
+                        t.from_type,
+                        t.from_id,
+                        t.relation,
+                        t.to_type,
+                        t.to_id,
+                        t.created_at as "created_at?: OffsetDateTime",
+                        t.updated_at as "updated_at?: OffsetDateTime"
+                    FROM triples t
+                    WHERE t.from_id = $1 AND t.relation = $2
                     LIMIT 1
                     "#,
                 from_id,
@@ -550,7 +690,7 @@ impl GraphRepository {
             )
             .fetch_optional(&self.pool)
             .await
-            .map_err(|e| anyhow!("Failed to fetch edge: {}", e)),
+            .map_err(|e| anyhow!("Failed to fetch edge: {}", e))?,
             ConsistencyMode::AtLeastAsFresh(_revision) | ConsistencyMode::ExactlyAt(_revision) => {
                 sqlx::query_as!(
                     Edge,
@@ -565,7 +705,6 @@ impl GraphRepository {
                         t.relation,
                         t.to_type,
                         t.to_id,
-                        t.metadata as "metadata: Value",
                         t.created_at as "created_at?: OffsetDateTime",
                         t.updated_at as "updated_at?: OffsetDateTime"
                     FROM triples t, snapshot s
@@ -580,65 +719,129 @@ impl GraphRepository {
                 )
                 .fetch_optional(&self.pool)
                 .await
-                .map_err(|e| anyhow!("Failed to fetch edge: {}", e))
+                .map_err(|e| anyhow!("Failed to fetch edge: {}", e))?
             }
+        };
+
+        if let Some(edge) = edge {
+            // Get the metadata for the edge based on consistency mode
+            let metadata = match &consistency {
+                ConsistencyMode::Full => sqlx::query_as!(
+                    MetadataRecord,
+                    r#"
+                        SELECT metadata
+                        FROM edge_metadata_history
+                        WHERE edge_id = $1
+                        AND created_xid <= pg_current_xact_id()
+                        AND deleted_xid > pg_current_xact_id()
+                        "#,
+                    edge.id
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to fetch edge metadata: {}", e))?,
+                ConsistencyMode::MinimizeLatency => sqlx::query_as!(
+                    MetadataRecord,
+                    r#"
+                        SELECT metadata
+                        FROM edge_metadata_history
+                        WHERE edge_id = $1
+                        ORDER BY created_xid DESC
+                        LIMIT 1
+                        "#,
+                    edge.id
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to fetch edge metadata: {}", e))?,
+                ConsistencyMode::AtLeastAsFresh(_revision)
+                | ConsistencyMode::ExactlyAt(_revision) => sqlx::query_as!(
+                    MetadataRecord,
+                    r#"
+                        WITH snapshot AS (
+                            SELECT $2::text::pg_snapshot as snapshot
+                        )
+                        SELECT metadata
+                        FROM edge_metadata_history h, snapshot s
+                        WHERE h.edge_id = $1
+                        AND h.created_xid <= pg_snapshot_xmax(s.snapshot)
+                        AND h.deleted_xid > pg_snapshot_xmax(s.snapshot)
+                        "#,
+                    edge.id,
+                    _revision.snapshot_string()
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to fetch edge metadata: {}", e))?,
+            };
+
+            Ok(Some(EdgeWithMetadata {
+                id: edge.id,
+                from_type: edge.from_type,
+                from_id: edge.from_id,
+                relation: edge.relation,
+                to_type: edge.to_type,
+                to_id: edge.to_id,
+                metadata: metadata.into_value(),
+                created_at: edge.created_at,
+                updated_at: edge.updated_at,
+            }))
+        } else {
+            Ok(None)
         }
     }
 
-    #[instrument(skip(self))]
     pub async fn get_edges(
         &self,
         from_id: i64,
         relation: &str,
         consistency: ConsistencyMode,
-    ) -> Result<Vec<Edge>> {
-        match &consistency {
+    ) -> Result<Vec<EdgeWithMetadata>> {
+        let edges = match &consistency {
             ConsistencyMode::Full => sqlx::query_as!(
                 Edge,
                 r#"
                     SELECT 
-                        id,
-                        from_type,
-                        from_id,
-                        relation,
-                        to_type,
-                        to_id,
-                        metadata as "metadata: Value",
-                        created_at as "created_at?: OffsetDateTime",
-                        updated_at as "updated_at?: OffsetDateTime"
-                    FROM triples
-                    WHERE from_id = $1 AND relation = $2
-                    AND created_xid <= pg_current_xact_id()
-                    AND deleted_xid > pg_current_xact_id()
+                        t.id,
+                        t.from_type,
+                        t.from_id,
+                        t.relation,
+                        t.to_type,
+                        t.to_id,
+                        t.created_at as "created_at?: OffsetDateTime",
+                        t.updated_at as "updated_at?: OffsetDateTime"
+                    FROM triples t
+                    WHERE t.from_id = $1 AND t.relation = $2
+                    AND t.created_xid <= pg_current_xact_id()
+                    AND t.deleted_xid > pg_current_xact_id()
                     "#,
                 from_id,
                 relation
             )
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| anyhow!("Failed to fetch edges: {}", e)),
+            .map_err(|e| anyhow!("Failed to fetch edges: {}", e))?,
             ConsistencyMode::MinimizeLatency => sqlx::query_as!(
                 Edge,
                 r#"
                     SELECT 
-                        id,
-                        from_type,
-                        from_id,
-                        relation,
-                        to_type,
-                        to_id,
-                        metadata as "metadata: Value",
-                        created_at as "created_at?: OffsetDateTime",
-                        updated_at as "updated_at?: OffsetDateTime"
-                    FROM triples
-                    WHERE from_id = $1 AND relation = $2
+                        t.id,
+                        t.from_type,
+                        t.from_id,
+                        t.relation,
+                        t.to_type,
+                        t.to_id,
+                        t.created_at as "created_at?: OffsetDateTime",
+                        t.updated_at as "updated_at?: OffsetDateTime"
+                    FROM triples t
+                    WHERE t.from_id = $1 AND t.relation = $2
                     "#,
                 from_id,
                 relation
             )
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| anyhow!("Failed to fetch edges: {}", e)),
+            .map_err(|e| anyhow!("Failed to fetch edges: {}", e))?,
             ConsistencyMode::AtLeastAsFresh(_revision) | ConsistencyMode::ExactlyAt(_revision) => {
                 sqlx::query_as!(
                     Edge,
@@ -653,7 +856,6 @@ impl GraphRepository {
                         t.relation,
                         t.to_type,
                         t.to_id,
-                        t.metadata as "metadata: Value",
                         t.created_at as "created_at?: OffsetDateTime",
                         t.updated_at as "updated_at?: OffsetDateTime"
                     FROM triples t, snapshot s
@@ -667,9 +869,77 @@ impl GraphRepository {
                 )
                 .fetch_all(&self.pool)
                 .await
-                .map_err(|e| anyhow!("Failed to fetch edges: {}", e))
+                .map_err(|e| anyhow!("Failed to fetch edges: {}", e))?
             }
+        };
+
+        let mut result = Vec::with_capacity(edges.len());
+        for edge in edges {
+            // Get the metadata for each edge based on consistency mode
+            let metadata = match &consistency {
+                ConsistencyMode::Full => sqlx::query_as!(
+                    MetadataRecord,
+                    r#"
+                        SELECT metadata
+                        FROM edge_metadata_history
+                        WHERE edge_id = $1
+                        AND created_xid <= pg_current_xact_id()
+                        AND deleted_xid > pg_current_xact_id()
+                        "#,
+                    edge.id
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to fetch edge metadata: {}", e))?,
+                ConsistencyMode::MinimizeLatency => sqlx::query_as!(
+                    MetadataRecord,
+                    r#"
+                        SELECT metadata
+                        FROM edge_metadata_history
+                        WHERE edge_id = $1
+                        ORDER BY created_xid DESC
+                        LIMIT 1
+                        "#,
+                    edge.id
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to fetch edge metadata: {}", e))?,
+                ConsistencyMode::AtLeastAsFresh(_revision)
+                | ConsistencyMode::ExactlyAt(_revision) => sqlx::query_as!(
+                    MetadataRecord,
+                    r#"
+                        WITH snapshot AS (
+                            SELECT $2::text::pg_snapshot as snapshot
+                        )
+                        SELECT metadata
+                        FROM edge_metadata_history h, snapshot s
+                        WHERE h.edge_id = $1
+                        AND h.created_xid <= pg_snapshot_xmax(s.snapshot)
+                        AND h.deleted_xid > pg_snapshot_xmax(s.snapshot)
+                        "#,
+                    edge.id,
+                    _revision.snapshot_string()
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| anyhow!("Failed to fetch edge metadata: {}", e))?,
+            };
+
+            result.push(EdgeWithMetadata {
+                id: edge.id,
+                from_type: edge.from_type,
+                from_id: edge.from_id,
+                relation: edge.relation,
+                to_type: edge.to_type,
+                to_id: edge.to_id,
+                metadata: metadata.into_value(),
+                created_at: edge.created_at,
+                updated_at: edge.updated_at,
+            });
         }
+
+        Ok(result)
     }
 
     #[instrument(skip(self))]
@@ -826,7 +1096,7 @@ mod tests {
         relation: String,
         from: &ObjectWithMetadata,
         to: &ObjectWithMetadata,
-    ) -> (Edge, Revision) {
+    ) -> (EdgeWithMetadata, Revision) {
         return repo
             .create_edge(
                 user_id,
